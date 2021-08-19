@@ -9,7 +9,7 @@
 WaveformTable::WaveformTable()
 {}
 
-void WaveformTable::set_mode(int mode)
+auto WaveformTable::lookup(int mode, int temperature) const -> const Waveform&
 {
     if (mode < 0 || mode >= this->mode_count) {
         std::ostringstream message;
@@ -18,11 +18,6 @@ void WaveformTable::set_mode(int mode)
         throw std::out_of_range(message.str());
     }
 
-    this->current_mode = mode;
-}
-
-void WaveformTable::set_temperature(int temperature)
-{
     std::vector<Temperature>::const_iterator it;
 
     if (temperature < -128) {
@@ -57,14 +52,8 @@ void WaveformTable::set_temperature(int temperature)
         throw std::out_of_range(message.str());
     }
 
-    this->current_temperature = it - this->temperatures.cbegin() - 1;
-}
-
-auto WaveformTable::lookup() const -> const Waveform&
-{
-    return this->waveforms[
-        waveform_lookup[this->current_mode][this->current_temperature]
-    ];
+    std::size_t range = it - this->temperatures.cbegin() - 1;
+    return this->waveforms[waveform_lookup[mode][range]];
 }
 
 /**
