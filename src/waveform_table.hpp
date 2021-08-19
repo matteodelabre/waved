@@ -1,42 +1,16 @@
 /**
  * @file
- * Types and classes for handling electrophoretic display (EPD) waveforms.
+ * Load electrophoretic display (EPD) waveform definition tables.
  */
 
 #ifndef WAVED_WAVEFORM_TABLE_HPP
 #define WAVED_WAVEFORM_TABLE_HPP
 
+#include "defs.hpp"
 #include <utility>
 #include <cstdint>
 #include <array>
 #include <vector>
-
-/**
- * Phase types.
- *
- * A phase is a command sent to an individual EPD cell for 1/85 s.
- */
-enum class Phase : std::uint8_t
-{
-    // Leave the cell in its present cell
-    Noop = 0b00,
-
-    // Apply a current to bring black particles to the top
-    Black = 0b01,
-
-    // Apply a current to bring white particles to the top
-    White = 0b10,
-};
-
-/**
- * Waveform.
- *
- * A waveform is a sequence of phases used to transition an EPD cell from a
- * given grayscale intensity to another.
- */
-using PhaseMatrix = std::array<std::array<Phase, 32>, 32>;
-using Waveform = std::vector<PhaseMatrix>;
-using WaveformLookup = std::vector<std::vector<std::size_t>>;
 
 /**
  * Waveform mode.
@@ -54,13 +28,11 @@ using Mode = std::uint8_t;
  */
 using Temperature = std::int8_t;
 
-/** Cell grayscale intensity (5 bits).  */
-using Intensity = std::uint8_t;
-
 /** Read and use waveform definitions. */
 class WaveformTable
 {
 public:
+    /** Create an empty waveform table. */
     WaveformTable();
 
     /**
@@ -95,6 +67,7 @@ public:
      * @return Corresponding waveform.
      */
     const Waveform& lookup() const;
+    using Lookup = std::vector<std::vector<std::size_t>>;
 
 private:
     // Number of available modes
@@ -119,7 +92,7 @@ private:
     std::vector<Waveform> waveforms;
 
     // Vector for looking the waveform corresponding to a mode and temperature
-    WaveformLookup waveform_lookup;
+    Lookup waveform_lookup;
 };
 
 #endif // WAVED_WAVEFORM_TABLE_HPP

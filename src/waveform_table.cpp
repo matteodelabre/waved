@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <set>
+#include <endian.h>
 
 WaveformTable::WaveformTable()
 {}
@@ -69,13 +70,17 @@ auto WaveformTable::lookup() const -> const Waveform&
 /**
  * WBF file decoding.
  *
+ * The WBF file is widely used for storing waveform data, but no official
+ * description of the format has been published by E-Ink. These decoding
+ * functions are based on the following unofficial sources.
+ *
  * Information sourced from:
  *
  * - <https://www.waveshare.net/w/upload/c/c4/E-paper-mode-declaration.pdf>
  * - <https://github.com/fread-ink/inkwave>
  * - <https://github.com/torvalds/linux/blob/master/drivers/video/fbdev/metronomefb.c>
  *
- * All values are little-endian.
+ * All values in WBF files are little-endian.
  */
 using Buffer = std::vector<char>;
 
@@ -131,10 +136,19 @@ constexpr auto expected_fvsn = 1;
 constexpr auto expected_luts = 4;
 constexpr auto expected_advanced_wfm_flags = 3;
 
-const wbf_header& parse_header(const Buffer& buffer)
+wbf_header parse_header(const Buffer& buffer)
 {
-    const auto& header = reinterpret_cast<const wbf_header&>(*buffer.data());
+    auto header = reinterpret_cast<const wbf_header&>(*buffer.data());
     const auto begin = buffer.cbegin();
+
+    // Fix endianness if needed
+    header.checksum = le32toh(header.checksum);
+    header.filesize = le32toh(header.filesize);
+    header.serial = le32toh(header.serial);
+    header.fpl_lot = le16toh(header.fpl_lot);
+    header._reserved1 = le16toh(header._reserved1);
+    header.extra_info_addr = le32toh(header.extra_info_addr);
+    header.wmta = le32toh(header.wmta);
 
     // Verify checksums
     std::uint8_t zeroes[] = {0, 0, 0, 0};
@@ -302,7 +316,7 @@ std::uint32_t parse_pointer(Buffer::const_iterator& begin)
     std::uint8_t byte3 = *begin;
     ++begin;
 
-    std::uint32_t pointer = byte1 + (byte2 << 8) + (byte3 << 16);
+    std::uint32_t pointer = le32toh(byte1 + (byte2 << 8) + (byte3 << 16));
     std::uint8_t checksum_verif = byte1 + byte2 + byte3;
     std::uint8_t checksum_expect = *begin;
     ++begin;
@@ -346,7 +360,6 @@ Waveform parse_waveform(
 )
 {
     end -= 2;
-    constexpr auto matrix_size = std::tuple_size<PhaseMatrix>::value;
 
     PhaseMatrix matrix;
     Waveform result;
@@ -388,12 +401,12 @@ Waveform parse_waveform(
             matrix[i][j++] = p3;
             matrix[i][j++] = p4;
 
-            if (j == matrix_size) {
+            if (j == intensity_values) {
                 j = 0;
                 ++i;
             }
 
-            if (i == matrix_size) {
+            if (i == intensity_values) {
                 i = 0;
                 result.push_back(matrix);
             }
@@ -403,7 +416,7 @@ Waveform parse_waveform(
     return result;
 }
 
-std::pair<std::vector<Waveform>, WaveformLookup> parse_waveforms(
+std::pair<std::vector<Waveform>, WaveformTable::Lookup> parse_waveforms(
     const wbf_header& header,
     const std::vector<std::uint32_t>& blocks,
     Buffer::const_iterator file_begin,
@@ -421,7 +434,7 @@ std::pair<std::vector<Waveform>, WaveformLookup> parse_waveforms(
 
     std::size_t mode_count = header.mode_count + 1;
     std::size_t temp_count = header.temp_range_count + 1;
-    WaveformLookup waveform_lookup;
+    WaveformTable::Lookup waveform_lookup;
     waveform_lookup.reserve(mode_count);
 
     for (std::size_t mode = 0; mode < mode_count; ++mode) {
@@ -464,7 +477,7 @@ WaveformTable WaveformTable::from_wbf(const char* path)
     file.read(buffer.data(), size);
 
     // Parse WBF header
-    const wbf_header& header = parse_header(buffer);
+    wbf_header header = parse_header(buffer);
     auto it = buffer.cbegin() + sizeof(header);
     result.mode_count = header.mode_count + 1;
 

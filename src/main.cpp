@@ -1,48 +1,30 @@
+#include "display.hpp"
 #include "waveform_table.hpp"
 #include <iostream>
 #include <string>
+#include <thread>
+#include <chrono>
 
-int main(int argc, const char** argv)
+int main(int, const char**)
 {
-    if (argc < 6) {
-        std::cerr << "Usage: " << argv[0] << " file mode temp from to\n";
-        return 1;
-    }
+    using namespace std::literals::chrono_literals;
 
-    auto table = WaveformTable::from_wbf(argv[1]);
-    int mode = std::stoi(argv[2]);
-    int temperature = std::stoi(argv[3]);
-    int from = std::stoi(argv[4]);
-    int to = std::stoi(argv[5]);
+    auto table = WaveformTable::from_wbf("/usr/share/remarkable/320_R349_AF0411_ED103TC2U2_VB3300-KCD_TC.wbf");
+    table.set_mode(0);
+    table.set_temperature(26);
 
-    if (from < 0 || from >= 32) {
-        std::cerr << "Error: Intensity must be between 0 and 31, got "
-            << from << '\n';
-        return 1;
-    }
+    Display display;
+    display.start();
 
-    if (to < 0 || to >= 32) {
-        std::cerr << "Error: Intensity must be between 0 and 31, got "
-            << to << '\n';
-        return 1;
-    }
+    Display::Update update;
+    update.region.top = 0;
+    update.region.left = 0;
+    update.region.width = Display::screen_width;
+    update.region.height = Display::screen_height;
+    update.waveform = &table.lookup();
+    update.buffer = std::vector<Intensity>(Display::screen_size, 0);
+    display.queue_update(std::move(update));
 
-    try {
-        table.set_mode(mode);
-        table.set_temperature(temperature);
-    } catch (const std::out_of_range& err) {
-        std::cerr << "Error: " << err.what() << '\n';
-        return 1;
-    }
-
-    const auto& waveform = table.lookup();
-    std::cerr << "Phases count: " << waveform.size() << '\n';
-    std::cerr << "Waveform: ";
-
-    for (const PhaseMatrix& matrix : waveform) {
-        std::cerr << (int) matrix[from][to] << ' ';
-    }
-
-    std::cerr << '\n';
+    std::this_thread::sleep_for(100s);
     return 0;
 }
