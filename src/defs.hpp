@@ -39,10 +39,10 @@ using Waveform = std::vector<PhaseMatrix>;
 /** Screen region. */
 struct Region
 {
-    uint32_t top;
-    uint32_t left;
-    uint32_t width;
-    uint32_t height;
+    std::uint32_t top;
+    std::uint32_t left;
+    std::uint32_t width;
+    std::uint32_t height;
 };
 
 #endif // WAVED_DEFS_HPP

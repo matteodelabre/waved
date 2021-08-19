@@ -364,8 +364,8 @@ Waveform parse_waveform(
     PhaseMatrix matrix;
     Waveform result;
 
-    uint8_t i = 0;
-    uint8_t j = 0;
+    std::uint8_t i = 0;
+    std::uint8_t j = 0;
     bool repeat_mode = true;
 
     while (begin != end) {
@@ -387,7 +387,7 @@ Waveform parse_waveform(
         if (repeat_mode && begin != end) {
             // In repeat_mode, each byte is followed by a repetition number;
             // otherwise, this number is assumed to be 1
-            repeat = static_cast<uint8_t>(*begin) + 1;
+            repeat = static_cast<std::uint8_t>(*begin) + 1;
             ++begin;
 
             if (byte == 0xFF) {

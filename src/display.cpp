@@ -103,7 +103,7 @@ void Display::start()
         );
     }
 
-    this->framebuffer = reinterpret_cast<uint8_t*>(mmap_res);
+    this->framebuffer = reinterpret_cast<std::uint8_t*>(mmap_res);
 
     // Initialize our null-phases buffer
     std::uint8_t* null_ptr = this->null_phases.data() + 2;
