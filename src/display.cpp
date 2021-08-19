@@ -259,6 +259,7 @@ auto Display::get_temperature() -> int
 void Display::push_update(Update&& update)
 {
     std::lock_guard<std::mutex> lock(this->updates_lock);
+    // TODO: Transpose, pad, and flip data
     this->pending_updates.emplace(update);
     this->updates_cv.notify_one();
 }
@@ -276,14 +277,14 @@ void Display::run_generator_thread()
         if (has_update && current_phase == active_update.waveform->size()) {
             const auto& region = active_update.region;
 
-            Intensity* to = this->current_intensity.data()
+            Intensity* prev = this->current_intensity.data()
                 + screen_width * region.top + region.left;
-            Intensity* from = active_update.buffer.data();
+            Intensity* next = active_update.buffer.data();
 
             for (std::size_t i = 0; i < region.height; ++i) {
-                std::memcpy(to, from, region.width * sizeof(Intensity));
-                to += screen_width;
-                from += region.width;
+                std::memcpy(prev, next, region.width * sizeof(Intensity));
+                prev += screen_width;
+                next += region.width;
             }
 
             has_update = false;
@@ -311,9 +312,7 @@ void Display::run_generator_thread()
 
         condition.wait(lock, [&ready] { return !ready; });
 
-        std::uint8_t* frame_base
-            = this->framebuffer + buf_frame * next_frame;
-
+        std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
         std::memcpy(
             frame_base,
             this->null_phases.data(),
@@ -323,46 +322,48 @@ void Display::run_generator_thread()
         const auto& region = active_update.region;
         const auto& matrix = (*active_update.waveform)[current_phase];
 
-        for (std::size_t x = 0; x < region.width; ++x) {
-            std::uint8_t* data =
-                frame_base + (
-                    screen_width - region.left - x - 1
-                    + margin_top
-                ) * buf_stride
-                + buf_depth * margin_left;
+        std::uint8_t* data = frame_base
+            + (margin_top + region.top) * buf_stride
+            + (margin_left + region.left / buf_actual_depth) * buf_depth;
 
-            Intensity* prev = this->current_intensity.data() + region.left + x
-                + region.height - 1;
-            Intensity* next = active_update.buffer.data() + x
-                + region.height - 1;
+        Intensity* prev = this->current_intensity.data()
+            + region.top * screen_width
+            + region.left;
 
-            for (std::size_t y = 0; y < region.height; y += 8, data += 2) {
-                auto phase1 = matrix[*prev--][*next--];
-                auto phase2 = matrix[*prev--][*next--];
-                auto phase3 = matrix[*prev--][*next--];
-                auto phase4 = matrix[*prev--][*next--];
-                auto phase5 = matrix[*prev--][*next--];
-                auto phase6 = matrix[*prev--][*next--];
-                auto phase7 = matrix[*prev--][*next--];
-                auto phase8 = matrix[*prev--][*next--];
+        Intensity* next = active_update.buffer.data();
+
+        for (std::size_t y = 0; y < region.height; ++y) {
+            for (std::size_t x = 0; x < region.width / 8; ++x) {
+                auto phase1 = matrix[*prev++][*next++];
+                auto phase2 = matrix[*prev++][*next++];
+                auto phase3 = matrix[*prev++][*next++];
+                auto phase4 = matrix[*prev++][*next++];
+                auto phase5 = matrix[*prev++][*next++];
+                auto phase6 = matrix[*prev++][*next++];
+                auto phase7 = matrix[*prev++][*next++];
+                auto phase8 = matrix[*prev++][*next++];
 
                 std::uint8_t byte1 = (
-                    (static_cast<std::uint8_t>(phase8) << 6)
-                    + (static_cast<std::uint8_t>(phase7) << 4)
-                    + (static_cast<std::uint8_t>(phase6) << 2)
-                    + static_cast<std::uint8_t>(phase5)
+                    (static_cast<std::uint8_t>(phase1) << 6)
+                    | (static_cast<std::uint8_t>(phase2) << 4)
+                    | (static_cast<std::uint8_t>(phase3) << 2)
+                    | static_cast<std::uint8_t>(phase4)
                 );
 
                 std::uint8_t byte2 = (
-                    (static_cast<std::uint8_t>(phase4) << 6)
-                    + (static_cast<std::uint8_t>(phase3) << 4)
-                    + (static_cast<std::uint8_t>(phase2) << 2)
-                    + static_cast<std::uint8_t>(phase1)
+                    (static_cast<std::uint8_t>(phase5) << 6)
+                    | (static_cast<std::uint8_t>(phase6) << 4)
+                    | (static_cast<std::uint8_t>(phase7) << 2)
+                    | static_cast<std::uint8_t>(phase8)
                 );
 
                 *data++ = byte1;
                 *data++ = byte2;
+                data += 2;
             }
+
+            prev += screen_width - region.width;
+            data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
         }
 
         ready = true;

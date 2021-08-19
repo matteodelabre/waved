@@ -129,9 +129,9 @@ private:
 public:
     // Visible screen size
     static constexpr std::size_t screen_width
-        = buf_height - margin_top - margin_bottom;
-    static constexpr std::size_t screen_height
         = (buf_width - margin_left - margin_right) * buf_actual_depth;
+    static constexpr std::size_t screen_height
+        = buf_height - margin_top - margin_bottom;
     static constexpr std::size_t screen_size = screen_width * screen_height;
 
 private:

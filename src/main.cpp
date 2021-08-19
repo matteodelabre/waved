@@ -21,7 +21,8 @@ int main(int, const char**)
     update.region.width = Display::screen_width;
     update.region.height = Display::screen_height;
     update.waveform = &table.lookup(/* mode = */ 0, temp);
-    update.buffer = std::vector<Intensity>(Display::screen_size, 0);
+    update.buffer = std::vector<Intensity>(
+        update.region.width * update.region.height, 0);
     display.push_update(std::move(update));
 
     display.start();
