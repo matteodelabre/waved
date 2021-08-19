@@ -12,17 +12,19 @@ int main(int, const char**)
     auto table = WaveformTable::from_wbf("/usr/share/remarkable/320_R349_AF0411_ED103TC2U2_VB3300-KCD_TC.wbf");
 
     Display display;
-    display.start();
+    auto temp = display.get_temperature();
+    std::cerr << "Panel temperature: " << temp << " °C\n";
 
     Display::Update update;
     update.region.top = 0;
     update.region.left = 0;
     update.region.width = Display::screen_width;
     update.region.height = Display::screen_height;
-    update.waveform = &table.lookup(/* mode = */ 0, /* temp = */ 26);
+    update.waveform = &table.lookup(/* mode = */ 0, temp);
     update.buffer = std::vector<Intensity>(Display::screen_size, 0);
-    display.queue_update(std::move(update));
+    display.push_update(std::move(update));
 
+    display.start();
     std::this_thread::sleep_for(100s);
     return 0;
 }

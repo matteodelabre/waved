@@ -25,31 +25,16 @@ public:
      * @param temperature_sensor_path Path to the temperature sensor device.
      */
     Display(const char* framebuffer_path, const char* temperature_sensor_path);
-
-    /** Stop operating the display and free up resources. */
     ~Display();
 
-    /** Initialize resources and start the processing threads. */
+    /** Start processing updates. */
     void start();
 
-    /**
-     * Change the power status of the display.
-     *
-     * Check `get_power()` to see if the operation succeeded.
-     *
-     * @param power True to power the display on, false to power it off.
-     */
-    void set_power(bool power);
+    /** Stop processing updates. */
+    void stop();
 
-    /** Get the current power status of the display. */
-    bool get_power() const;
-
-    /**
-     * Get the current display temperature in Celsius.
-     *
-     * This will report 0 if the display is powered off.
-     */
-    int get_temperature() const;
+    /** Get the current display temperature in Celsius. */
+    int get_temperature();
 
     /** Information about a display update to be performed. */
     struct Update
@@ -65,7 +50,7 @@ public:
     };
 
     /** Add an update to the queue. */
-    void queue_update(Update&& update);
+    void push_update(Update&& update);
 
 private:
     // True if the processing threads have been started
@@ -81,7 +66,11 @@ private:
     std::uint8_t* framebuffer = nullptr;
 
     // True if the display is powered on
-    bool power_on = false;
+    bool power_state = false;
+    std::mutex power_lock;
+
+    /** Turn the display controller on or off. */
+    void set_power(bool power_state);
 
     // File descriptor for reading the panel temperature
     FileDescriptor temperature_sensor_fd;

@@ -31,17 +31,12 @@ Display::Display(
 
 Display::~Display()
 {
-    if (this->started) {
-        this->stopping = true;
-        this->generator_thread.join();
-        this->vsync_thread.join();
-    }
-
-    this->set_power(false);
+    this->stop();
 }
 
 void Display::start()
 {
+    this->stopping = false;
     this->set_power(true);
 
     if (
@@ -180,48 +175,76 @@ void Display::start()
     // Start the processing threads
     this->generator_thread = std::thread(&Display::run_generator_thread, this);
     this->vsync_thread = std::thread(&Display::run_vsync_thread, this);
+    this->started = true;
+}
+
+void Display::stop()
+{
+    if (this->started) {
+        this->stopping = true;
+        this->generator_thread.join();
+        this->vsync_thread.join();
+
+        if (this->framebuffer != nullptr) {
+            munmap(this->framebuffer, this->fix_info.smem_len);
+        }
+
+        this->started = false;
+    }
+
+    this->set_power(false);
 }
 
 constexpr int fbioblank_off = FB_BLANK_POWERDOWN;
 constexpr int fbioblank_on = FB_BLANK_UNBLANK;
 
-void Display::set_power(bool power)
+void Display::set_power(bool power_state)
 {
-    if (power != this->power_on) {
+    if (power_state != this->power_state) {
         if (
             ioctl(
                 this->framebuffer_fd, FBIOBLANK,
-                power ? fbioblank_on : fbioblank_off
+                power_state ? fbioblank_on : fbioblank_off
             ) == 0
         ) {
-            this->power_on = power;
+            this->power_state = power_state;
         }
     }
 }
 
-auto Display::get_temperature() const -> int
+auto Display::get_temperature() -> int
 {
-    if (!this->power_on) {
-        return 0;
-    }
-
-    if (lseek(this->temperature_sensor_fd, 0, SEEK_SET) != 0) {
-        throw std::system_error(
-            errno,
-            std::generic_category(),
-            "Seek in panel temperature file"
-        );
-    }
-
     char buffer[12];
-    ssize_t size = read(this->temperature_sensor_fd, buffer, sizeof(buffer));
+    ssize_t size = 0;
 
-    if (size == -1) {
-        throw std::system_error(
-            errno,
-            std::generic_category(),
-            "Read panel temperature"
-        );
+    {
+        // The controller needs to be powered on, otherwise
+        // we get a temperature reading of 0 °C
+        std::lock_guard<std::mutex> lock(this->power_lock);
+        bool old_power_state = this->power_state;
+        this->set_power(true);
+
+        if (lseek(this->temperature_sensor_fd, 0, SEEK_SET) != 0) {
+            this->set_power(old_power_state);
+            throw std::system_error(
+                errno,
+                std::generic_category(),
+                "Seek in panel temperature file"
+            );
+        }
+
+        size = read(this->temperature_sensor_fd, buffer, sizeof(buffer));
+
+        if (size == -1) {
+            this->set_power(old_power_state);
+            throw std::system_error(
+                errno,
+                std::generic_category(),
+                "Read panel temperature"
+            );
+        }
+
+        this->set_power(old_power_state);
     }
 
     if (static_cast<size_t>(size) >= sizeof(buffer)) {
@@ -233,7 +256,7 @@ auto Display::get_temperature() const -> int
     return std::stoi(buffer);
 }
 
-void Display::queue_update(Update&& update)
+void Display::push_update(Update&& update)
 {
     std::lock_guard<std::mutex> lock(this->updates_lock);
     this->pending_updates.emplace(update);
@@ -361,24 +384,31 @@ void Display::run_vsync_thread()
         const auto pred = [&ready] { return ready; };
 
         if (!condition.wait_for(lock, power_off_timeout, pred)) {
-            // Turn off power to save battery when no updates are coming
-            this->set_power(false);
+            {
+                // Turn off power to save battery when no updates are coming
+                std::lock_guard<std::mutex> lock(this->power_lock);
+                this->set_power(false);
+            }
+
             condition.wait(lock, pred);
-            this->set_power(true);
         }
 
-        this->var_info.yoffset = next_frame * buf_height;
+        {
+            std::lock_guard<std::mutex> lock(this->power_lock);
+            this->set_power(true);
+            this->var_info.yoffset = next_frame * buf_height;
 
-        if (
-            ioctl(
-                this->framebuffer_fd,
-                FBIOPAN_DISPLAY,
-                &this->var_info
-            ) == -1
-        ) {
-            // Don’t throw here, since we’re inside a background thread
-            std::cerr << "Vsync error: " << std::strerror(errno) << '\n';
-            return;
+            if (
+                ioctl(
+                    this->framebuffer_fd,
+                    FBIOPAN_DISPLAY,
+                    &this->var_info
+                ) == -1
+            ) {
+                // Don’t throw here, since we’re inside a background thread
+                std::cerr << "Vsync error: " << std::strerror(errno) << '\n';
+                return;
+            }
         }
 
         ready = false;
