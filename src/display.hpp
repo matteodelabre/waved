@@ -88,7 +88,8 @@ private:
 
     // Number of bytes per pixel. The first two bytes of each pixel contain
     // data for 8 actual display pixels (2 bits per pixel). The third byte
-    // contains a fixed value whose role is unclear. The fourth byte is null
+    // contains a fixed value whose role is unclear (probably some sync
+    // markers). The fourth byte is null
     static constexpr std::size_t buf_depth = 4;
 
     // Number of bytes per row
@@ -109,6 +110,14 @@ private:
     // the display controller
     static constexpr std::size_t buf_total_frames = 17;
 
+    // Number of usable frames
+    static constexpr std::size_t buf_usable_frames = 16;
+
+    // Since the driver has “prevent frying pan” mode enabled, it flips to
+    // the last frame by default after sending each frame. This is to reduce
+    // the risk of applying a charge for too long on the EPD.
+    static constexpr std::size_t buf_default_frame = 16;
+
     // State of each frame in the buffer. True if the frame contains data
     // ready to be sent to the controller, false otherwise
     std::array<bool, buf_total_frames> frame_readiness;
@@ -121,8 +130,8 @@ private:
     std::array<std::mutex, buf_total_frames> frame_locks;
 
     // Margins of unused pixels in each frame of the buffer
-    static constexpr std::size_t margin_top = 2;
-    static constexpr std::size_t margin_bottom = 2;
+    static constexpr std::size_t margin_top = 3;
+    static constexpr std::size_t margin_bottom = 1;
     static constexpr std::size_t margin_left = 26;
     static constexpr std::size_t margin_right = 0;
 
@@ -138,7 +147,7 @@ private:
     // A static buffer that contains pixels with bytes 1, 2, and 4 set to zero
     // and byte 3 set to its appropriate fixed value. Used for resetting a
     // frame when preparing the next frame
-    std::array<std::uint8_t, buf_frame> null_phases{};
+    std::array<std::uint8_t, buf_frame> null_frame{};
 
     // Buffer holding the current known intensity state of all cells
     std::array<Intensity, screen_size> current_intensity;
@@ -155,6 +164,9 @@ private:
     /** Thread that sends ready frames to the display controller via vsync. */
     std::thread vsync_thread;
     void run_vsync_thread();
+
+    /** Store a null frame at the given buffer location. */
+    void reset_frame(std::size_t frame_index);
 };
 
 #endif // WAVED_DISPLAY_HPP

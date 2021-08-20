@@ -14,7 +14,7 @@
 namespace chrono = std::chrono;
 
 /** Time after which to power off the display if no updates are received. */
-constexpr chrono::milliseconds power_off_timeout{1000};
+constexpr chrono::milliseconds power_off_timeout{3000};
 
 Display::Display()
 // TODO: Auto-detect appropriate paths rather than hardcoding them
@@ -100,77 +100,82 @@ void Display::start()
 
     this->framebuffer = reinterpret_cast<std::uint8_t*>(mmap_res);
 
-    // Initialize our null-phases buffer
-    std::uint8_t* null_ptr = this->null_phases.data() + 2;
+    // Initialize the null frame
+    std::uint8_t* null_ptr = this->null_frame.data() + 2;
 
-    // First line: 43 (x 20) 47 (x 20) 45 (x 63) 47 (x 40) 43 (x 117)
+    // First line
     for (std::size_t i = 0; i < 20; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x43;
+        *null_ptr = 0b01000011;
     }
 
     for (std::size_t i = 0; i < 20; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x47;
+        *null_ptr = 0b01000111;
     }
 
     for (std::size_t i = 0; i < 63; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x45;
+        *null_ptr = 0b01000101;
     }
 
     for (std::size_t i = 0; i < 40; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x47;
+        *null_ptr = 0b01000111;
     }
 
     for (std::size_t i = 0; i < 117; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x43;
+        *null_ptr = 0b01000011;
     }
 
-    // Second line: 41 (x 8) 61 (x 11) 41 (x 36) 43 (x 200) 41 (x 5)
-    for (std::size_t i = 0; i < 8; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x41;
-    }
-
-    for (std::size_t i = 0; i < 11; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x61;
-    }
-
-    for (std::size_t i = 0; i < 36; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x41;
-    }
-
-    for (std::size_t i = 0; i < 200; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x43;
-    }
-
-    for (std::size_t i = 0; i < 5; ++i, null_ptr += buf_depth) {
-        *null_ptr = 0x41;
-    }
-
-    // Other lines: 41 (x 8) 61 (x 11) 41 (x 7) 51 (x 29) 53 (x 200) 51 (x 5)
-    for (std::size_t i = 2; i < buf_height; ++i) {
+    // Second and third lines
+    for (std::size_t y = 0; y < 2; ++y) {
         for (std::size_t i = 0; i < 8; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x41;
+            *null_ptr = 0b01000001;
         }
 
         for (std::size_t i = 0; i < 11; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x61;
+            *null_ptr = 0b01100001;
         }
 
-        for (std::size_t i = 0; i < 7; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x41;
-        }
-
-        for (std::size_t i = 0; i < 29; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x51;
+        for (std::size_t i = 0; i < 36; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01000001;
         }
 
         for (std::size_t i = 0; i < 200; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x53;
+            *null_ptr = 0b01000011;
         }
 
         for (std::size_t i = 0; i < 5; ++i, null_ptr += buf_depth) {
-            *null_ptr = 0x51;
+            *null_ptr = 0b01000001;
         }
     }
+
+    // Following lines
+    for (std::size_t y = 3; y < buf_height; ++y) {
+        for (std::size_t i = 0; i < 8; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01000001;
+        }
+
+        for (std::size_t i = 0; i < 11; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01100001;
+        }
+
+        for (std::size_t i = 0; i < 7; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01000001;
+        }
+
+        for (std::size_t i = 0; i < 29; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01010001;
+        }
+
+        for (std::size_t i = 0; i < 200; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01010011;
+        }
+
+        for (std::size_t i = 0; i < 5; ++i, null_ptr += buf_depth) {
+            *null_ptr = 0b01010001;
+        }
+    }
+
+    // Store a null frame as default frame
+    this->reset_frame(buf_default_frame);
 
     // Start the processing threads
     this->generator_thread = std::thread(&Display::run_generator_thread, this);
@@ -313,11 +318,7 @@ void Display::run_generator_thread()
         condition.wait(lock, [&ready] { return !ready; });
 
         std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
-        std::memcpy(
-            frame_base,
-            this->null_phases.data(),
-            this->null_phases.size()
-        );
+        this->reset_frame(next_frame);
 
         const auto& region = active_update.region;
         const auto& matrix = (*active_update.waveform)[current_phase];
@@ -370,28 +371,33 @@ void Display::run_generator_thread()
         condition.notify_one();
 
         ++current_phase;
-        next_frame = (next_frame + 1) % buf_total_frames;
+        next_frame = (next_frame + 1) % buf_usable_frames;
     }
 }
 
 void Display::run_vsync_thread()
 {
+    bool first_frame = true;
+
+    std::size_t cur_frame = 0;
+    std::unique_lock<std::mutex> cur_lock;
+
     std::size_t next_frame = 0;
+    std::unique_lock<std::mutex> next_lock(this->frame_locks[next_frame]);
 
     while (!this->stopping) {
-        std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
-        auto& condition = this->frame_cvs[next_frame];
-        auto& ready = this->frame_readiness[next_frame];
-        const auto pred = [&ready] { return ready; };
+        auto& next_condition = this->frame_cvs[next_frame];
+        auto& next_ready = this->frame_readiness[next_frame];
+        const auto pred = [&next_ready] { return next_ready; };
 
-        if (!condition.wait_for(lock, power_off_timeout, pred)) {
+        if (!next_condition.wait_for(next_lock, power_off_timeout, pred)) {
             {
                 // Turn off power to save battery when no updates are coming
                 std::lock_guard<std::mutex> lock(this->power_lock);
                 this->set_power(false);
             }
 
-            condition.wait(lock, pred);
+            next_condition.wait(next_lock, pred);
         }
 
         {
@@ -399,6 +405,7 @@ void Display::run_vsync_thread()
             this->set_power(true);
             this->var_info.yoffset = next_frame * buf_height;
 
+            // Wait for vsync and flip before clearing the frame
             if (
                 ioctl(
                     this->framebuffer_fd,
@@ -407,13 +414,32 @@ void Display::run_vsync_thread()
                 ) == -1
             ) {
                 // Don’t throw here, since we’re inside a background thread
-                std::cerr << "Vsync error: " << std::strerror(errno) << '\n';
+                std::cerr << "Vsync and flip: " << std::strerror(errno) << '\n';
                 return;
             }
         }
 
-        ready = false;
-        condition.notify_one();
-        next_frame = (next_frame + 1) % Display::buf_total_frames;
+        if (first_frame) {
+            first_frame = false;
+        } else {
+            this->frame_readiness[cur_frame] = false;
+            this->frame_cvs[cur_frame].notify_one();
+            cur_lock.unlock();
+        }
+
+        cur_frame = next_frame;
+        cur_lock = std::move(next_lock);
+
+        next_frame = (next_frame + 1) % buf_usable_frames;
+        next_lock = std::unique_lock<std::mutex>(this->frame_locks[next_frame]);
     }
+}
+
+void Display::reset_frame(std::size_t frame_index)
+{
+    std::memcpy(
+        this->framebuffer + buf_frame * frame_index,
+        this->null_frame.data(),
+        this->null_frame.size()
+    );
 }
