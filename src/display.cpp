@@ -179,7 +179,11 @@ void Display::start()
 
     // Start the processing threads
     this->generator_thread = std::thread(&Display::run_generator_thread, this);
+    pthread_setname_np(this->generator_thread.native_handle(), "waved_generator");
+
     this->vsync_thread = std::thread(&Display::run_vsync_thread, this);
+    pthread_setname_np(this->vsync_thread.native_handle(), "waved_vsync");
+
     this->started = true;
 }
 
