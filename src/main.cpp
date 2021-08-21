@@ -16,6 +16,7 @@ int main(int, const char**)
     std::cerr << "Panel temperature: " << temp << " °C\n";
 
     Display::Update update;
+
     update.region.top = 0;
     update.region.left = 0;
     update.region.width = Display::screen_width;
@@ -24,6 +25,37 @@ int main(int, const char**)
     update.buffer = std::vector<Intensity>(
         update.region.width * update.region.height, 0);
     display.push_update(std::move(update));
+
+    update.region.top = 100;
+    update.region.left = 104;
+    update.region.width = Display::screen_width - 208;
+    update.region.height = Display::screen_height - 200;
+    update.waveform = &table.lookup(/* mode = */ 0, temp);
+    update.buffer = std::vector<Intensity>(
+        update.region.width * update.region.height, 0);
+    display.push_update(std::move(update));
+
+    update.region.top = 200;
+    update.region.left = 208;
+    update.region.width = Display::screen_width - 416;
+    update.region.height = Display::screen_height - 400;
+    update.waveform = &table.lookup(/* mode = */ 0, temp);
+    update.buffer = std::vector<Intensity>(
+        update.region.width * update.region.height, 0);
+    display.push_update(std::move(update));
+
+    for (Mode mode = 1; mode < 8; ++mode) {
+        for (Intensity val = 0; val < 32; val += 4) {
+            update.region.top = 200 + (val / 4 * 104);
+            update.region.left = 104 + (mode * 104);
+            update.region.width = 104;
+            update.region.height = 104;
+            update.waveform = &table.lookup(mode, temp);
+            update.buffer = std::vector<Intensity>(
+                update.region.width * update.region.height, val);
+            display.push_update(std::move(update));
+        }
+    }
 
     display.start();
     std::this_thread::sleep_for(100s);
