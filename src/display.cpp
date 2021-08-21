@@ -277,65 +277,54 @@ void Display::run_generator_thread()
 {
     std::size_t next_frame = 0;
 
-    bool has_update = false;
-    Update active_update;
-    std::size_t current_phase = 0;
-
     while (!this->stopping) {
-        // Current update has finished, update intensity data
-        if (has_update && current_phase == active_update.waveform->size()) {
-            const auto& region = active_update.region;
+        Update update = this->pop_update();
+        this->generate_frames(next_frame, update);
+        this->commit_update(update);
+    }
+}
 
-            Intensity* prev = this->current_intensity.data()
-                + screen_width * region.top + region.left;
-            Intensity* next = active_update.buffer.data();
+Display::Update Display::pop_update()
+{
+    std::unique_lock<std::mutex> lock(this->updates_lock);
+    this->updates_cv.wait(lock, [this] {
+        return !this->pending_updates.empty();
+    });
 
-            for (std::size_t i = 0; i < region.height; ++i) {
-                std::memcpy(prev, next, region.width * sizeof(Intensity));
-                prev += screen_width;
-                next += region.width;
-            }
+    Update update = std::move(this->pending_updates.front());
+    this->pending_updates.pop();
+    lock.unlock();
+    return update;
+}
 
-            has_update = false;
-        }
+void Display::generate_frames(std::size_t& next_frame, const Update& update)
+{
+    const auto& region = update.region;
 
-        // Fetch the next update from the queue
-        if (!has_update) {
-            std::unique_lock<std::mutex> lock(this->updates_lock);
-            this->updates_cv.wait(lock, [this] {
-                return !this->pending_updates.empty();
-            });
+    const Intensity* prev_base = this->current_intensity.data()
+        + region.top * screen_width
+        + region.left;
 
-            active_update = std::move(this->pending_updates.front());
-            this->pending_updates.pop();
-            lock.unlock();
+    const Intensity* next_base = update.buffer.data();
 
-            has_update = true;
-            current_phase = 0;
-        }
-
-        // Generate the next phase frame
+    for (const auto& matrix : *update.waveform) {
         std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
         auto& condition = this->frame_cvs[next_frame];
         auto& ready = this->frame_readiness[next_frame];
 
         condition.wait(lock, [&ready] { return !ready; });
 
+        // We have a time budget of approximately 10 ms to generate each frame
+        // otherwise the vsync thread will catch up
         std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
         this->reset_frame(next_frame);
-
-        const auto& region = active_update.region;
-        const auto& matrix = (*active_update.waveform)[current_phase];
 
         std::uint8_t* data = frame_base
             + (margin_top + region.top) * buf_stride
             + (margin_left + region.left / buf_actual_depth) * buf_depth;
 
-        Intensity* prev = this->current_intensity.data()
-            + region.top * screen_width
-            + region.left;
-
-        Intensity* next = active_update.buffer.data();
+        const Intensity* prev = prev_base;
+        const Intensity* next = next_base;
 
         for (std::size_t y = 0; y < region.height; ++y) {
             for (std::size_t x = 0; x < region.width / 8; ++x) {
@@ -373,9 +362,31 @@ void Display::run_generator_thread()
 
         ready = true;
         condition.notify_one();
-
-        ++current_phase;
         next_frame = (next_frame + 1) % buf_usable_frames;
+    }
+}
+
+void Display::reset_frame(std::size_t frame_index)
+{
+    std::memcpy(
+        this->framebuffer + buf_frame * frame_index,
+        this->null_frame.data(),
+        this->null_frame.size()
+    );
+}
+
+void Display::commit_update(const Update& update)
+{
+    const auto& region = update.region;
+
+    Intensity* prev = this->current_intensity.data()
+        + screen_width * region.top + region.left;
+    const Intensity* next = update.buffer.data();
+
+    for (std::size_t i = 0; i < region.height; ++i) {
+        std::memcpy(prev, next, region.width * sizeof(Intensity));
+        prev += screen_width;
+        next += region.width;
     }
 }
 
@@ -437,13 +448,4 @@ void Display::run_vsync_thread()
         next_frame = (next_frame + 1) % buf_usable_frames;
         next_lock = std::unique_lock<std::mutex>(this->frame_locks[next_frame]);
     }
-}
-
-void Display::reset_frame(std::size_t frame_index)
-{
-    std::memcpy(
-        this->framebuffer + buf_frame * frame_index,
-        this->null_frame.data(),
-        this->null_frame.size()
-    );
 }

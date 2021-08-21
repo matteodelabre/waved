@@ -150,7 +150,7 @@ private:
     std::array<std::uint8_t, buf_frame> null_frame{};
 
     // Buffer holding the current known intensity state of all cells
-    std::array<Intensity, screen_size> current_intensity;
+    std::array<Intensity, screen_size> current_intensity{};
 
     // Queue of pending updates
     std::queue<Update> pending_updates;
@@ -161,12 +161,21 @@ private:
     std::thread generator_thread;
     void run_generator_thread();
 
-    /** Thread that sends ready frames to the display controller via vsync. */
-    std::thread vsync_thread;
-    void run_vsync_thread();
+    /** Remove the next update from the queue (or wait if queue is empty). */
+    Update pop_update();
+
+    /** Prepare phase frames for the given update. */
+    void generate_frames(std::size_t& next_frame, const Update& update);
 
     /** Store a null frame at the given buffer location. */
     void reset_frame(std::size_t frame_index);
+
+    /** Update current_intensity status with the given finished update. */
+    void commit_update(const Update& update);
+
+    /** Thread that sends ready frames to the display controller via vsync. */
+    std::thread vsync_thread;
+    void run_vsync_thread();
 };
 
 #endif // WAVED_DISPLAY_HPP
