@@ -297,14 +297,55 @@ Display::Update Display::pop_update()
     return update;
 }
 
+std::vector<bool> Display::check_consecutive(const Update& update)
+{
+    const auto& region = update.region;
+    std::vector<bool> result(region.height * region.width / buf_actual_depth);
+
+    const Intensity* prev_base = this->current_intensity.data()
+        + region.top * screen_width
+        + region.left;
+    const Intensity* next_base = update.buffer.data();
+
+    const Intensity* prev = prev_base;
+    const Intensity* next = next_base;
+
+    bool first = true;
+    std::array<Intensity, buf_actual_depth> last_prevs;
+    std::array<Intensity, buf_actual_depth> last_nexts;
+    std::size_t i = 0;
+
+    for (std::size_t y = 0; y < region.height; ++y) {
+        for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {
+            result[i] = (
+                !first
+                && std::equal(last_prevs.cbegin(), last_prevs.cend(), prev)
+                && std::equal(last_nexts.cbegin(), last_nexts.cend(), next)
+            );
+
+            first = false;
+            std::copy(prev, prev + buf_actual_depth, last_prevs.begin());
+            std::copy(next, next + buf_actual_depth, last_nexts.begin());
+
+            prev += buf_actual_depth;
+            next += buf_actual_depth;
+            ++i;
+        }
+
+        prev += screen_width - region.width;
+    }
+
+    return result;
+}
+
 void Display::generate_frames(std::size_t& next_frame, const Update& update)
 {
+    std::vector<bool> is_consecutive = this->check_consecutive(update);
     const auto& region = update.region;
 
     const Intensity* prev_base = this->current_intensity.data()
         + region.top * screen_width
         + region.left;
-
     const Intensity* next_base = update.buffer.data();
 
     for (const auto& matrix : *update.waveform) {
@@ -326,34 +367,41 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         const Intensity* prev = prev_base;
         const Intensity* next = next_base;
 
+        std::size_t i = 0;
+        std::uint8_t byte1;
+        std::uint8_t byte2;
+
         for (std::size_t y = 0; y < region.height; ++y) {
             for (std::size_t x = 0; x < region.width / 8; ++x) {
-                auto phase1 = matrix[*prev++][*next++];
-                auto phase2 = matrix[*prev++][*next++];
-                auto phase3 = matrix[*prev++][*next++];
-                auto phase4 = matrix[*prev++][*next++];
-                auto phase5 = matrix[*prev++][*next++];
-                auto phase6 = matrix[*prev++][*next++];
-                auto phase7 = matrix[*prev++][*next++];
-                auto phase8 = matrix[*prev++][*next++];
+                if (!is_consecutive[i]) {
+                    auto phase1 = matrix[*prev++][*next++];
+                    auto phase2 = matrix[*prev++][*next++];
+                    auto phase3 = matrix[*prev++][*next++];
+                    auto phase4 = matrix[*prev++][*next++];
+                    auto phase5 = matrix[*prev++][*next++];
+                    auto phase6 = matrix[*prev++][*next++];
+                    auto phase7 = matrix[*prev++][*next++];
+                    auto phase8 = matrix[*prev++][*next++];
 
-                std::uint8_t byte1 = (
-                    (static_cast<std::uint8_t>(phase1) << 6)
-                    | (static_cast<std::uint8_t>(phase2) << 4)
-                    | (static_cast<std::uint8_t>(phase3) << 2)
-                    | static_cast<std::uint8_t>(phase4)
-                );
+                    byte1 = (
+                        (static_cast<std::uint8_t>(phase1) << 6)
+                        | (static_cast<std::uint8_t>(phase2) << 4)
+                        | (static_cast<std::uint8_t>(phase3) << 2)
+                        | static_cast<std::uint8_t>(phase4)
+                    );
 
-                std::uint8_t byte2 = (
-                    (static_cast<std::uint8_t>(phase5) << 6)
-                    | (static_cast<std::uint8_t>(phase6) << 4)
-                    | (static_cast<std::uint8_t>(phase7) << 2)
-                    | static_cast<std::uint8_t>(phase8)
-                );
+                    byte2 = (
+                        (static_cast<std::uint8_t>(phase5) << 6)
+                        | (static_cast<std::uint8_t>(phase6) << 4)
+                        | (static_cast<std::uint8_t>(phase7) << 2)
+                        | static_cast<std::uint8_t>(phase8)
+                    );
+                }
 
                 *data++ = byte1;
                 *data++ = byte2;
                 data += 2;
+                ++i;
             }
 
             prev += screen_width - region.width;
@@ -368,10 +416,10 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
 
 void Display::reset_frame(std::size_t frame_index)
 {
-    std::memcpy(
-        this->framebuffer + buf_frame * frame_index,
-        this->null_frame.data(),
-        this->null_frame.size()
+    std::copy(
+        this->null_frame.cbegin(),
+        this->null_frame.cend(),
+        this->framebuffer + buf_frame * frame_index
     );
 }
 
@@ -384,7 +432,7 @@ void Display::commit_update(const Update& update)
     const Intensity* next = update.buffer.data();
 
     for (std::size_t i = 0; i < region.height; ++i) {
-        std::memcpy(prev, next, region.width * sizeof(Intensity));
+        std::copy(next, next + region.width, prev);
         prev += screen_width;
         next += region.width;
     }

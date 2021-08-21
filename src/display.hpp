@@ -164,6 +164,9 @@ private:
     /** Remove the next update from the queue (or wait if queue is empty). */
     Update pop_update();
 
+    /** Scan an update to find pixel transitions equal to their predecessor. */
+    std::vector<bool> check_consecutive(const Update& update);
+
     /** Prepare phase frames for the given update. */
     void generate_frames(std::size_t& next_frame, const Update& update);
 
