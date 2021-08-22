@@ -528,11 +528,15 @@ void Display::run_vsync_thread()
             this->set_power(true);
             this->var_info.yoffset = next_frame * buf_height;
 
-            // Wait for vsync and flip before clearing the frame
             if (
                 ioctl(
                     this->framebuffer_fd,
-                    FBIOPAN_DISPLAY,
+                    first_frame
+                        // Schedule first frame
+                        ? FBIOPUT_VSCREENINFO
+                        // Schedule next frame and wait
+                        // for vsync of previous frame
+                        : FBIOPAN_DISPLAY,
                     &this->var_info
                 ) == -1
             ) {
