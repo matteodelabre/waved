@@ -366,10 +366,10 @@ Waveform parse_waveform(
             continue;
         }
 
-        Phase p1 = static_cast<Phase>(byte & 3);
-        Phase p2 = static_cast<Phase>((byte >> 2) & 3);
-        Phase p3 = static_cast<Phase>((byte >> 4) & 3);
-        Phase p4 = static_cast<Phase>(byte >> 6);
+        Phase p4 = static_cast<Phase>(byte & 3);
+        Phase p3 = static_cast<Phase>((byte >> 2) & 3);
+        Phase p2 = static_cast<Phase>((byte >> 4) & 3);
+        Phase p1 = static_cast<Phase>(byte >> 6);
 
         int repeat = 1;
 
@@ -385,10 +385,10 @@ Waveform parse_waveform(
         }
 
         for (int n = 0; n < repeat; ++n) {
-            matrix[i][j++] = p1;
-            matrix[i][j++] = p2;
-            matrix[i][j++] = p3;
-            matrix[i][j++] = p4;
+            matrix[j++][i] = p1;
+            matrix[j++][i] = p2;
+            matrix[j++][i] = p3;
+            matrix[j++][i] = p4;
 
             if (j == intensity_values) {
                 j = 0;

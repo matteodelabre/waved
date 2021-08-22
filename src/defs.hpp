@@ -22,7 +22,11 @@ enum class Phase : std::uint8_t
     White = 0b10,
 };
 
-/** Cell grayscale intensity (5 bits).  */
+/**
+ * Cell grayscale intensity (5 bits).
+ *
+ * Only even values are used. 0 denotes full black, 30 full white.
+ */
 using Intensity = std::uint8_t;
 constexpr std::uint8_t intensity_values = 1 << 5;
 
