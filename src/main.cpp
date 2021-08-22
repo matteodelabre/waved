@@ -15,45 +15,36 @@ int main(int, const char**)
     auto temp = display.get_temperature();
     std::cerr << "Panel temperature: " << temp << " °C\n";
 
-    Display::Update update;
+    display.push_update(
+        Region{
+            /* top = */ 0, /* left = */ 0,
+            /* width = */ 1404, /* height = */ 1872
+        },
+        std::vector<Intensity>(1404 * 1872, 0),
+        &table.lookup(/* mode = */ 0, temp)
+    );
 
-    update.region.top = 0;
-    update.region.left = 0;
-    update.region.width = Display::screen_width;
-    update.region.height = Display::screen_height;
-    update.waveform = &table.lookup(/* mode = */ 0, temp);
-    update.buffer = std::vector<Intensity>(
-        update.region.width * update.region.height, 0);
-    display.push_update(std::move(update));
-
-    update.region.top = 100;
-    update.region.left = 104;
-    update.region.width = Display::screen_width - 208;
-    update.region.height = Display::screen_height - 200;
-    update.waveform = &table.lookup(/* mode = */ 0, temp);
-    update.buffer = std::vector<Intensity>(
-        update.region.width * update.region.height, 0);
-    display.push_update(std::move(update));
-
-    update.region.top = 200;
-    update.region.left = 208;
-    update.region.width = Display::screen_width - 416;
-    update.region.height = Display::screen_height - 400;
-    update.waveform = &table.lookup(/* mode = */ 0, temp);
-    update.buffer = std::vector<Intensity>(
-        update.region.width * update.region.height, 0);
-    display.push_update(std::move(update));
+    display.push_update(
+        Region{
+            /* top = */ 100, /* left = */ 104,
+            /* width = */ 1204, /* height = */ 1664
+        },
+        std::vector<Intensity>(1204 * 1664, 0),
+        &table.lookup(/* mode = */ 0, temp)
+    );
 
     for (Mode mode = 1; mode < 8; ++mode) {
-        for (Intensity val = 0; val < 32; val += 4) {
-            update.region.top = 200 + (val / 4 * 104);
-            update.region.left = 104 + (mode * 104);
-            update.region.width = 104;
-            update.region.height = 104;
-            update.waveform = &table.lookup(mode, temp);
-            update.buffer = std::vector<Intensity>(
-                update.region.width * update.region.height, val);
-            display.push_update(std::move(update));
+        for (Intensity val = 0; val < 32; ++val) {
+            display.push_update(
+                Region{
+                    /* top = */ val * 48U,
+                    /* left = */ 200 + (mode - 1) * 150U,
+                    /* width = */ 100,
+                    /* height = */ 48
+                },
+                std::vector<Intensity>(100 * 48, val),
+                &table.lookup(mode, temp)
+            );
         }
     }
 

@@ -7,10 +7,14 @@
 #include <condition_variable>
 #include <mutex>
 #include <queue>
+#include <chrono>
 #include <thread>
 #include <cstdlib>
 #include <cstdint>
 #include <linux/fb.h>
+
+/** Time after which to switch the controller off if no updates are received. */
+constexpr std::chrono::milliseconds power_off_timeout{3000};
 
 class Display
 {
@@ -25,9 +29,18 @@ public:
      * @param temperature_sensor_path Path to the temperature sensor device.
      */
     Display(const char* framebuffer_path, const char* temperature_sensor_path);
+
     ~Display();
 
-    /** Start processing updates. */
+    /**
+     * Start processing updates.
+     *
+     * This method will power on the display controller and process updates
+     * added to the queue using `push_update()` continuously from a background
+     * thread. If no updates are received for `power_off_timeout` ticks, the
+     * controller is switched off to save power. Calling `stop()` or destroying
+     * this object will stop the background threads.
+     */
     void start();
 
     /** Stop processing updates. */
@@ -36,21 +49,20 @@ public:
     /** Get the current display temperature in Celsius. */
     int get_temperature();
 
-    /** Information about a display update to be performed. */
-    struct Update
-    {
-        // Coordinates of the region affected by the update
-        Region region{};
-
-        // Buffer containing the new intensities of the region
-        std::vector<Intensity> buffer;
-
-        // Pointer to the waveform to use for the update
-        const Waveform* waveform = nullptr;
-    };
-
-    /** Add an update to the queue. */
-    void push_update(Update&& update);
+    /**
+     * Add an update to the queue.
+     *
+     * @param region Coordinates of the region affected by the update.
+     * @param buffer New values for the pixels in the updated region.
+     * @param waveform Waveform to use for updating pixels. The waveform object
+     * must live until this update is processed, which can take some time.
+     * @return True if the update was pushed, false if it was deemed invalid.
+     */
+    bool push_update(
+        Region region,
+        const std::vector<Intensity>& buffer,
+        const Waveform* waveform
+    );
 
 private:
     // True if the processing threads have been started
@@ -81,7 +93,7 @@ private:
 
     // Fixed sizes for the framebuffer. Ideally, those sizes would be provided
     // by var_info and fix_info above so we don’t have to hardcode them, but
-    // unfortunately they don’t
+    // unfortunately they don’t match exactly
 
     // Number of pixels in a row of the buffer
     static constexpr std::size_t buf_width = 260;
@@ -110,13 +122,17 @@ private:
     // the display controller
     static constexpr std::size_t buf_total_frames = 17;
 
-    // Number of usable frames
-    static constexpr std::size_t buf_usable_frames = 16;
-
-    // Since the driver has “prevent frying pan” mode enabled, it flips to
-    // the last frame by default after sending each frame. This is to reduce
-    // the risk of applying a charge for too long on the EPD.
+    // The MXSFB driver automatically flips to the last frame of the buffer
+    // after each vsync (unless we ask for another flip within the next
+    // vsync interval). By storing a null frame at this default location, we
+    // ensure that a charge is never applied for too long on the EPD, even
+    // if there is a bug in our program. This feature is called “prevent frying
+    // pan” mode in the MXSFB kernel driver
     static constexpr std::size_t buf_default_frame = 16;
+
+    // Number of usable frames, excluding the default frame which
+    // we shouldn’t change for reasons stated above
+    static constexpr std::size_t buf_usable_frames = 16;
 
     // State of each frame in the buffer. True if the frame contains data
     // ready to be sent to the controller, false otherwise
@@ -135,22 +151,50 @@ private:
     static constexpr std::size_t margin_left = 26;
     static constexpr std::size_t margin_right = 0;
 
-public:
-    // Visible screen size
-    static constexpr std::size_t screen_width
+    // Visible screen size. This is expressed in the EPD coordinate system,
+    // whose origin is at the bottom right corner of the usual reMarkable
+    // coordinate system, with the X and Y axes swapped and flipped
+    // (see the diagram below, representing a tablet in portrait orientation)
+    //
+    //       ^+--------------+
+    //       ||              | - X = epd_width
+    //       ||              |
+    //       ||              |
+    //       ||              |
+    //       ||  reMarkable  |
+    //       ||              |
+    //       ||              |
+    //       ||              | ^
+    //       ||              | | X = 0
+    //       ++--------------+ |
+    //         |         <-----+
+    //       Y = height . Y = 0
+    static constexpr std::size_t epd_width
         = (buf_width - margin_left - margin_right) * buf_actual_depth;
-    static constexpr std::size_t screen_height
+    static constexpr std::size_t epd_height
         = buf_height - margin_top - margin_bottom;
-    static constexpr std::size_t screen_size = screen_width * screen_height;
+    static constexpr std::size_t epd_size = epd_width * epd_height;
 
-private:
     // A static buffer that contains pixels with bytes 1, 2, and 4 set to zero
     // and byte 3 set to its appropriate fixed value. Used for resetting a
-    // frame when preparing the next frame
+    // frame when preparing it
     std::array<std::uint8_t, buf_frame> null_frame{};
 
-    // Buffer holding the current known intensity state of all cells
-    std::array<Intensity, screen_size> current_intensity{};
+    // Buffer holding the current known intensity state of all display cells
+    std::array<Intensity, epd_size> current_intensity{};
+
+    /** Information about a pending display update. */
+    struct Update
+    {
+        // Coordinates of the region affected by the update
+        Region region{};
+
+        // Buffer containing the new intensities of the region
+        std::vector<Intensity> buffer;
+
+        // Pointer to the waveform to use for the update
+        const Waveform* waveform = nullptr;
+    };
 
     // Queue of pending updates
     std::queue<Update> pending_updates;

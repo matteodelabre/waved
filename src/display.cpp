@@ -11,11 +11,6 @@
 #include <sys/mman.h>
 #include <bitset>
 
-namespace chrono = std::chrono;
-
-/** Time after which to power off the display if no updates are received. */
-constexpr chrono::milliseconds power_off_timeout{3000};
-
 Display::Display()
 // TODO: Auto-detect appropriate paths rather than hardcoding them
 : Display("/dev/fb0", "/sys/class/hwmon/hwmon1/temp0")
@@ -76,10 +71,10 @@ void Display::start()
         || this->fix_info.smem_len < buf_width * buf_height
             * buf_total_frames * buf_depth
     ) {
-        throw std::runtime_error("The phase buffer has invalid dimensions");
+        throw std::runtime_error("The framebuffer has invalid dimensions");
     }
 
-    // Map the phase buffer to memory
+    // Map the framebuffer to memory
     void* mmap_res = mmap(
         /* addr = */ nullptr,
         /* len = */ this->fix_info.smem_len,
@@ -94,7 +89,7 @@ void Display::start()
         throw std::system_error(
             errno,
             std::generic_category(),
-            "Map phase buffer to memory"
+            "Map framebuffer to memory"
         );
     }
 
@@ -125,7 +120,7 @@ void Display::start()
     }
 
     // Second and third lines
-    for (std::size_t y = 0; y < 2; ++y) {
+    for (std::size_t y = 1; y < 3; ++y) {
         for (std::size_t i = 0; i < 8; ++i, null_ptr += buf_depth) {
             *null_ptr = 0b01000001;
         }
@@ -265,12 +260,51 @@ auto Display::get_temperature() -> int
     return std::stoi(buffer);
 }
 
-void Display::push_update(Update&& update)
+bool Display::push_update(
+    Region region,
+    const std::vector<Intensity>& buffer,
+    const Waveform* waveform
+)
 {
+    if (buffer.size() != region.width * region.height) {
+        return false;
+    }
+
+    // Transform from reMarkable coordinates to EPD coordinates:
+    // transpose to swap X and Y and flip X and Y
+    std::vector<Intensity> trans_buffer(buffer.size());
+
+    for (std::size_t k = 0; k < buffer.size(); ++k) {
+        std::size_t i = region.height - (k % region.height) - 1;
+        std::size_t j = region.width - (k / region.height) - 1;
+        trans_buffer[k] = buffer[i * region.width + j] & (intensity_values - 1);
+    }
+
+    region = Region{
+        /* top = */ epd_height - region.left - region.width,
+        /* left = */ epd_width - region.top - region.height,
+        /* width = */ region.height,
+        /* height = */ region.width
+    };
+
+    if (
+        region.left >= epd_width
+        || region.top >= epd_height
+        || region.left + region.width > epd_width
+        || region.top + region.height > epd_height
+    ) {
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(this->updates_lock);
-    // TODO: Transpose, pad, and flip data
-    this->pending_updates.emplace(update);
+    this->pending_updates.emplace(Update{
+        region,
+        std::move(trans_buffer),
+        waveform
+    });
+
     this->updates_cv.notify_one();
+    return true;
 }
 
 void Display::run_generator_thread()
@@ -303,7 +337,7 @@ std::vector<bool> Display::check_consecutive(const Update& update)
     std::vector<bool> result(region.height * region.width / buf_actual_depth);
 
     const Intensity* prev_base = this->current_intensity.data()
-        + region.top * screen_width
+        + region.top * epd_width
         + region.left;
     const Intensity* next_base = update.buffer.data();
 
@@ -332,7 +366,7 @@ std::vector<bool> Display::check_consecutive(const Update& update)
             ++i;
         }
 
-        prev += screen_width - region.width;
+        prev += epd_width - region.width;
     }
 
     return result;
@@ -344,7 +378,7 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
     const auto& region = update.region;
 
     const Intensity* prev_base = this->current_intensity.data()
-        + region.top * screen_width
+        + region.top * epd_width
         + region.left;
     const Intensity* next_base = update.buffer.data();
 
@@ -404,7 +438,7 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
                 ++i;
             }
 
-            prev += screen_width - region.width;
+            prev += epd_width - region.width;
             data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
         }
 
@@ -428,12 +462,12 @@ void Display::commit_update(const Update& update)
     const auto& region = update.region;
 
     Intensity* prev = this->current_intensity.data()
-        + screen_width * region.top + region.left;
+        + epd_width * region.top + region.left;
     const Intensity* next = update.buffer.data();
 
     for (std::size_t i = 0; i < region.height; ++i) {
         std::copy(next, next + region.width, prev);
-        prev += screen_width;
+        prev += epd_width;
         next += region.width;
     }
 }
