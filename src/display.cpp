@@ -31,7 +31,6 @@ Display::~Display()
 
 void Display::start()
 {
-    this->stopping = false;
     this->set_power(true);
 
     if (
@@ -173,9 +172,11 @@ void Display::start()
     this->reset_frame(buf_default_frame);
 
     // Start the processing threads
+    this->stopping_generator = false;
     this->generator_thread = std::thread(&Display::run_generator_thread, this);
     pthread_setname_np(this->generator_thread.native_handle(), "waved_generator");
 
+    this->stopping_vsync = false;
     this->vsync_thread = std::thread(&Display::run_vsync_thread, this);
     pthread_setname_np(this->vsync_thread.native_handle(), "waved_vsync");
 
@@ -185,8 +186,18 @@ void Display::start()
 void Display::stop()
 {
     if (this->started) {
-        this->stopping = true;
+        // Wait for the current update to be processed then terminate
+        this->stopping_generator = true;
+        this->updates_cv.notify_one();
         this->generator_thread.join();
+
+        // Terminate the vsync thread by triggering all the frame cvs
+        this->stopping_vsync = true;
+
+        for (std::size_t i = 0; i < this->frame_cvs.size(); ++i) {
+            this->frame_cvs[i].notify_one();
+        }
+
         this->vsync_thread.join();
 
         if (this->framebuffer != nullptr) {
@@ -311,23 +322,29 @@ void Display::run_generator_thread()
 {
     std::size_t next_frame = 0;
 
-    while (!this->stopping) {
-        Update update = this->pop_update();
-        this->generate_frames(next_frame, update);
-        this->commit_update(update);
+    while (!this->stopping_generator) {
+        std::optional<Update> update = this->pop_update();
+
+        if (update) {
+            this->generate_frames(next_frame, *update);
+            this->commit_update(*update);
+        }
     }
 }
 
-Display::Update Display::pop_update()
+std::optional<Display::Update> Display::pop_update()
 {
     std::unique_lock<std::mutex> lock(this->updates_lock);
     this->updates_cv.wait(lock, [this] {
-        return !this->pending_updates.empty();
+        return !this->pending_updates.empty() || this->stopping_generator;
     });
+
+    if (this->stopping_generator) {
+        return {};
+    }
 
     Update update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
-    lock.unlock();
     return update;
 }
 
@@ -485,10 +502,12 @@ void Display::run_vsync_thread()
     std::size_t next_frame = 0;
     std::unique_lock<std::mutex> next_lock(this->frame_locks[next_frame]);
 
-    while (!this->stopping) {
+    while (!this->stopping_vsync) {
         auto& next_condition = this->frame_cvs[next_frame];
         auto& next_ready = this->frame_readiness[next_frame];
-        const auto pred = [&next_ready] { return next_ready; };
+        const auto pred = [&next_ready, this] {
+            return next_ready || this->stopping_vsync;
+        };
 
         if (!next_condition.wait_for(next_lock, power_off_timeout, pred)) {
             {
@@ -498,6 +517,10 @@ void Display::run_vsync_thread()
             }
 
             next_condition.wait(next_lock, pred);
+        }
+
+        if (this->stopping_vsync) {
+            return;
         }
 
         {

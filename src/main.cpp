@@ -60,6 +60,8 @@ int main(int, const char**)
     }
 
     display.start();
-    std::this_thread::sleep_for(100s);
+
+    // TODO: Synchronize with update processing
+    std::this_thread::sleep_for(8s);
     return 0;
 }

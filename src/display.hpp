@@ -3,6 +3,8 @@
 
 #include "defs.hpp"
 #include "file_descriptor.hpp"
+#include <atomic>
+#include <optional>
 #include <array>
 #include <condition_variable>
 #include <mutex>
@@ -68,8 +70,9 @@ private:
     // True if the processing threads have been started
     bool started = false;
 
-    // True if the processing threads need to stop
-    bool stopping = false;
+    // Signals that the generator and vsync threads need to stop
+    std::atomic<bool> stopping_generator = false;
+    std::atomic<bool> stopping_vsync = false;
 
     // File descriptor for the framebuffer
     FileDescriptor framebuffer_fd;
@@ -206,7 +209,7 @@ private:
     void run_generator_thread();
 
     /** Remove the next update from the queue (or wait if queue is empty). */
-    Update pop_update();
+    std::optional<Update> pop_update();
 
     /** Scan an update to find pixel transitions equal to their predecessor. */
     std::vector<bool> check_consecutive(const Update& update);
