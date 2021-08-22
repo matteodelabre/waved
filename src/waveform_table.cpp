@@ -56,6 +56,16 @@ auto WaveformTable::lookup(int mode, int temperature) const -> const Waveform&
     return this->waveforms[waveform_lookup[mode][range]];
 }
 
+auto WaveformTable::get_temperatures() const -> const std::vector<Temperature>&
+{
+    return this->temperatures;
+}
+
+auto WaveformTable::get_mode_count() const -> Mode
+{
+    return this->mode_count;
+}
+
 /**
  * WBF file decoding.
  *
@@ -68,6 +78,7 @@ auto WaveformTable::lookup(int mode, int temperature) const -> const Waveform&
  * - <https://www.waveshare.net/w/upload/c/c4/E-paper-mode-declaration.pdf>
  * - <https://github.com/fread-ink/inkwave>
  * - <https://github.com/torvalds/linux/blob/master/drivers/video/fbdev/metronomefb.c>
+ * - <https://github.com/julbouln/ice40_eink_controller/blob/master/utils/wbf_dump/wbf_dump.c>
  *
  * All values in WBF files are little-endian.
  */
@@ -125,8 +136,16 @@ constexpr auto expected_fvsn = 1;
 constexpr auto expected_luts = 4;
 constexpr auto expected_advanced_wfm_flags = 3;
 
-wbf_header parse_header(const Buffer& buffer)
+auto parse_header(const Buffer& buffer) -> wbf_header
 {
+    if (buffer.size() < sizeof(wbf_header)) {
+        std::ostringstream message;
+        message << "Too short to be a WBF file: file is "
+            << buffer.size() << " bytes long while the minimum header size is "
+            << sizeof(wbf_header) << " bytes";
+        throw std::runtime_error(message.str());
+    }
+
     auto header = reinterpret_cast<const wbf_header&>(*buffer.data());
     const auto begin = buffer.cbegin();
 
@@ -267,9 +286,9 @@ wbf_header parse_header(const Buffer& buffer)
     return header;
 }
 
-std::vector<Temperature> parse_temperatures(
+auto parse_temperatures(
     const wbf_header& header, Buffer::const_iterator& begin
-)
+) -> std::vector<Temperature>
 {
     std::vector<Temperature> result;
     std::size_t count = header.temp_range_count + 2;
@@ -296,7 +315,7 @@ std::vector<Temperature> parse_temperatures(
     return result;
 }
 
-std::uint32_t parse_pointer(Buffer::const_iterator& begin)
+auto parse_pointer(Buffer::const_iterator& begin) -> std::uint32_t
 {
     std::uint8_t byte1 = *begin;
     ++begin;
@@ -321,11 +340,11 @@ std::uint32_t parse_pointer(Buffer::const_iterator& begin)
     return pointer;
 }
 
-std::vector<std::uint32_t> find_waveform_blocks(
+auto find_waveform_blocks(
     const wbf_header& header,
     Buffer::const_iterator file_begin,
     Buffer::const_iterator table_begin
-)
+) -> std::vector<std::uint32_t>
 {
     std::size_t mode_count = header.mode_count + 1;
     std::size_t temp_count = header.temp_range_count + 1;
@@ -343,10 +362,8 @@ std::vector<std::uint32_t> find_waveform_blocks(
     return {result.begin(), result.end()};
 }
 
-Waveform parse_waveform(
-    Buffer::const_iterator begin,
-    Buffer::const_iterator end
-)
+auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
+-> Waveform
 {
     end -= 2;
 
@@ -405,12 +422,12 @@ Waveform parse_waveform(
     return result;
 }
 
-std::pair<std::vector<Waveform>, WaveformTable::Lookup> parse_waveforms(
+auto parse_waveforms(
     const wbf_header& header,
     const std::vector<std::uint32_t>& blocks,
     Buffer::const_iterator file_begin,
     Buffer::const_iterator table_begin
-)
+) -> std::pair<std::vector<Waveform>, WaveformTable::Lookup>
 {
     std::vector<Waveform> waveforms;
 
@@ -445,25 +462,15 @@ std::pair<std::vector<Waveform>, WaveformTable::Lookup> parse_waveforms(
     return {waveforms, waveform_lookup};
 }
 
-WaveformTable WaveformTable::from_wbf(const char* path)
+auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
 {
     WaveformTable result;
 
     // Read the entire file in memory
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-
-    if (!file) {
-        throw std::system_error(
-            errno,
-            std::generic_category(),
-            "(WaveformTable::from_wbf) Open file for reading"
-        );
-    }
-
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    Buffer buffer(size);
-    file.read(buffer.data(), size);
+    std::ostringstream buffer_read;
+    buffer_read << file.rdbuf();
+    const std::string& buffer_str = buffer_read.str();
+    Buffer buffer(buffer_str.cbegin(), buffer_str.cend());
 
     // Parse WBF header
     wbf_header header = parse_header(buffer);
@@ -479,10 +486,23 @@ WaveformTable WaveformTable::from_wbf(const char* path)
 
     // Parse waveforms
     auto blocks = find_waveform_blocks(header, buffer.cbegin(), it);
-    blocks.push_back(size);
+    blocks.push_back(buffer.size());
     auto waveforms = parse_waveforms(header, blocks, buffer.cbegin(), it);
 
     result.waveforms = std::move(waveforms.first);
     result.waveform_lookup = std::move(waveforms.second);
     return result;
+}
+
+auto WaveformTable::from_wbf(const char* path) -> WaveformTable
+{
+    std::ifstream file(path, std::ios::binary);
+
+    if (!file) {
+        throw std::system_error(
+            errno, std::generic_category(), "Open file for reading"
+        );
+    }
+
+    return WaveformTable::from_wbf(file);
 }

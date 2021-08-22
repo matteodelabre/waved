@@ -10,6 +10,11 @@ add_executable(waved
     src/waveform_table.cpp
 )
 
+add_executable(waved-dump-wbf
+    src/dump_wbf.cpp
+    src/waveform_table.cpp
+)
+
 # Enable C++17 support
 if(CMAKE_VERSION VERSION_LESS "3.8")
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

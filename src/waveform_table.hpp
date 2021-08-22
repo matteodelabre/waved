@@ -41,9 +41,16 @@ public:
      * @param path Path to the file.
      * @return Parsed waveform table.
      * @throws std::runtime_error If a parsing error occurs.
-     * @throws std::system_error If the file cannot be read.
      */
     static WaveformTable from_wbf(const char* path);
+
+    /**
+     * @overload
+     * @param file Opened stream to read from.
+     * @throws std::runtime_error If a parsing error occurs.
+     * @throws std::system_error If the file cannot be read.
+     */
+    static WaveformTable from_wbf(std::istream& file);
 
     /**
      * Lookup the waveform for the given mode and temperature.
@@ -56,6 +63,12 @@ public:
      */
     const Waveform& lookup(int mode, int temperature) const;
     using Lookup = std::vector<std::vector<std::size_t>>;
+
+    /** Get the available operating temperature thresholds. */
+    const std::vector<Temperature>& get_temperatures() const;
+
+    /** Get the number of available modes. */
+    Mode get_mode_count() const;
 
 private:
     // Number of available modes
