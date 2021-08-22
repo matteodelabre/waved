@@ -430,6 +430,9 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
                         | (static_cast<std::uint8_t>(phase7) << 2)
                         | static_cast<std::uint8_t>(phase8)
                     );
+                } else {
+                    prev += 8;
+                    next += 8;
                 }
 
                 *data++ = byte1;
