@@ -11,12 +11,12 @@ https://user-images.githubusercontent.com/1370040/130524775-c99bc205-9c89-48a3-8
 ### Building
 
 Pre-built binaries are available from the [releases page](https://github.com/matteodelabre/waved/releases).\
-To compile the demo from the [base](https://github.com/toltec-dev/toolchain/pkgs/container/base) Toltec Docker image:
+To compile the demo from the [base](https://github.com/toltec-dev/toolchain/pkgs/container/base) Toltec Docker image with the source mounted in `/host`:
 
 ```sh
 cmake \
     -DCMAKE_TOOLCHAIN_FILE=/usr/share/cmake/arm-linux-gnueabihf.cmake \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
     -S /host -B /host/build
 cmake --build /host/build --verbose
 ```
