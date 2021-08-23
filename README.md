@@ -10,7 +10,8 @@ https://user-images.githubusercontent.com/1370040/130524775-c99bc205-9c89-48a3-8
 
 ### Building
 
-To compile the demo, from the [base](https://github.com/toltec-dev/toolchain/pkgs/container/base) Toltec Docker image:
+Pre-built binaries are available from the [releases page](https://github.com/matteodelabre/waved/releases).\
+To compile the demo from the [base](https://github.com/toltec-dev/toolchain/pkgs/container/base) Toltec Docker image:
 
 ```sh
 cmake \
