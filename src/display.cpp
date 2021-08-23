@@ -485,17 +485,17 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
                     auto phase8 = matrix[*prev++][*next++];
 
                     byte1 = (
-                        (static_cast<std::uint8_t>(phase1) << 6)
-                        | (static_cast<std::uint8_t>(phase2) << 4)
-                        | (static_cast<std::uint8_t>(phase3) << 2)
-                        | static_cast<std::uint8_t>(phase4)
-                    );
-
-                    byte2 = (
                         (static_cast<std::uint8_t>(phase5) << 6)
                         | (static_cast<std::uint8_t>(phase6) << 4)
                         | (static_cast<std::uint8_t>(phase7) << 2)
                         | static_cast<std::uint8_t>(phase8)
+                    );
+
+                    byte2 = (
+                        (static_cast<std::uint8_t>(phase1) << 6)
+                        | (static_cast<std::uint8_t>(phase2) << 4)
+                        | (static_cast<std::uint8_t>(phase3) << 2)
+                        | static_cast<std::uint8_t>(phase4)
                     );
                 } else {
                     prev += buf_actual_depth;
