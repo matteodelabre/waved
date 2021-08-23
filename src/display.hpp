@@ -211,6 +211,9 @@ private:
     /** Remove the next update from the queue (or wait if queue is empty). */
     std::optional<Update> pop_update();
 
+    /** Align an update on a 8-pixel boundary on the X axis. */
+    void align_update(Update& update);
+
     /** Scan an update to find pixel transitions equal to their predecessor. */
     std::vector<bool> check_consecutive(const Update& update);
 

@@ -9,6 +9,7 @@ int main(int, const char**)
 {
     using namespace std::literals::chrono_literals;
 
+    // TODO: Auto-detect appropriate WBF file from barcode
     auto table = WaveformTable::from_wbf("/usr/share/remarkable/320_R349_AF0411_ED103TC2U2_VB3300-KCD_TC.wbf");
 
     Display display;
@@ -26,22 +27,21 @@ int main(int, const char**)
 
     display.push_update(
         Region{
-            /* top = */ 100, /* left = */ 104,
-            /* width = */ 1204, /* height = */ 1664
+            /* top = */ 100, /* left = */ 100,
+            /* width = */ 1204, /* height = */ 1672
         },
-        std::vector<Intensity>(1204 * 1664, 30),
+        std::vector<Intensity>(1204 * 1672, 30),
         &table.lookup(/* mode = */ 0, temp)
     );
 
-    constexpr std::size_t cell_width = 100;
-    constexpr std::size_t cell_height = 96;
+    constexpr std::size_t cell_size = 100;
     constexpr std::size_t cell_count = 16;
-    std::vector<Intensity> buffer(cell_width * cell_height * cell_count);
+    std::vector<Intensity> buffer(cell_size * cell_size * cell_count);
 
     for (std::size_t i = 0; i < cell_count; ++i) {
         std::fill(
-            buffer.begin() + cell_width * cell_height * i,
-            buffer.begin() + cell_width * cell_height * (i + 1),
+            buffer.begin() + cell_size * cell_size * i,
+            buffer.begin() + cell_size * cell_size * (i + 1),
             static_cast<Intensity>(i * 2)
         );
     }
@@ -49,10 +49,10 @@ int main(int, const char**)
     for (Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
             Region{
-                /* top = */ 192,
+                /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
-                /* width = */ cell_width,
-                /* height = */ cell_height * cell_count
+                /* width = */ cell_size,
+                /* height = */ cell_size * cell_count
             },
             buffer,
             &table.lookup(mode, temp)

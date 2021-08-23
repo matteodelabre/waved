@@ -323,11 +323,13 @@ void Display::run_generator_thread()
     std::size_t next_frame = 0;
 
     while (!this->stopping_generator) {
-        std::optional<Update> update = this->pop_update();
+        std::optional<Update> maybe_update = this->pop_update();
 
-        if (update) {
-            this->generate_frames(next_frame, *update);
-            this->commit_update(*update);
+        if (maybe_update) {
+            Update& update = *maybe_update;
+            this->align_update(update);
+            this->generate_frames(next_frame, update);
+            this->commit_update(update);
         }
     }
 }
@@ -346,6 +348,54 @@ std::optional<Display::Update> Display::pop_update()
     Update update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
     return update;
+}
+
+void Display::align_update(Update& update)
+{
+    constexpr auto mask = buf_actual_depth - 1;
+
+    if (
+        update.region.width & mask == 0
+        && update.region.left & mask == 0
+    ) {
+        return;
+    }
+
+    auto aligned_left = update.region.left & ~mask;
+    auto pad_left = update.region.left & mask;
+    auto new_width = (pad_left + update.region.width + mask) & ~mask;
+    auto pad_right = new_width - pad_left - update.region.width;
+
+    std::vector<Intensity> new_buffer(update.region.height * new_width);
+
+    const Intensity* prev = this->current_intensity.data()
+        + update.region.top * epd_width
+        + aligned_left;
+
+    const Intensity* old_next = update.buffer.data();
+    Intensity* new_next = new_buffer.data();
+
+    for (std::size_t y = 0; y < update.region.height; ++y) {
+        for (std::size_t x = 0; x < pad_left; ++x) {
+            *new_next++ = *prev++;
+        }
+
+        for (std::size_t x = 0; x < update.region.width; ++x) {
+            *new_next++ = *old_next++;
+        }
+
+        prev += update.region.width;
+
+        for (std::size_t x = 0; x < pad_right; ++x) {
+            *new_next++ = *prev++;
+        }
+
+        prev += epd_width - new_width;
+    }
+
+    update.buffer = std::move(new_buffer);
+    update.region.left = aligned_left;
+    update.region.width = new_width;
 }
 
 std::vector<bool> Display::check_consecutive(const Update& update)
@@ -423,7 +473,7 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         std::uint8_t byte2;
 
         for (std::size_t y = 0; y < region.height; ++y) {
-            for (std::size_t x = 0; x < region.width / 8; ++x) {
+            for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {
                 if (!is_consecutive[i]) {
                     auto phase1 = matrix[*prev++][*next++];
                     auto phase2 = matrix[*prev++][*next++];
@@ -448,8 +498,8 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
                         | static_cast<std::uint8_t>(phase8)
                     );
                 } else {
-                    prev += 8;
-                    next += 8;
+                    prev += buf_actual_depth;
+                    next += buf_actual_depth;
                 }
 
                 *data++ = byte1;
