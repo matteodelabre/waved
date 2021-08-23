@@ -21,16 +21,19 @@ constexpr std::chrono::milliseconds power_off_timeout{3000};
 class Display
 {
 public:
-    /** Open the display with auto-detected device paths. */
-    Display();
-
     /**
      * Open a display with given device paths.
      *
      * @param framebuffer_path Path to the framebuffer device.
-     * @param temperature_sensor_path Path to the temperature sensor device.
+     * @param temperature_sensor_path Path to the temperature sensor file.
      */
     Display(const char* framebuffer_path, const char* temperature_sensor_path);
+
+    /** Discover the path to framebuffer device. */
+    static std::optional<std::string> discover_framebuffer();
+
+    /** Discover the path to the temperature sensor file. */
+    static std::optional<std::string> discover_temperature_sensor();
 
     ~Display();
 
@@ -74,7 +77,7 @@ private:
     std::atomic<bool> stopping_generator = false;
     std::atomic<bool> stopping_vsync = false;
 
-    // File descriptor for the framebuffer
+    // File descriptor for the framebuffer device
     FileDescriptor framebuffer_fd;
 
     // Pointer to the mmap’ed framebuffer
@@ -99,31 +102,31 @@ private:
     // unfortunately they don’t match exactly
 
     // Number of pixels in a row of the buffer
-    static constexpr std::size_t buf_width = 260;
+    static constexpr std::uint32_t buf_width = 260;
 
     // Number of bytes per pixel. The first two bytes of each pixel contain
     // data for 8 actual display pixels (2 bits per pixel). The third byte
     // contains a fixed value whose role is unclear (probably some sync
     // markers). The fourth byte is null
-    static constexpr std::size_t buf_depth = 4;
+    static constexpr std::uint32_t buf_depth = 4;
 
     // Number of bytes per row
-    static constexpr std::size_t buf_stride = buf_width * buf_depth;
+    static constexpr std::uint32_t buf_stride = buf_width * buf_depth;
 
     // Number of actual display pixels in each buffer pixel (see above)
-    static constexpr std::size_t buf_actual_depth = 8;
+    static constexpr std::uint32_t buf_actual_depth = 8;
 
     // Number of rows in the screen
-    static constexpr std::size_t buf_height = 1408;
+    static constexpr std::uint32_t buf_height = 1408;
 
     // Total size of a frame in bytes
-    static constexpr std::size_t buf_frame = buf_stride * buf_height;
+    static constexpr std::uint32_t buf_frame = buf_stride * buf_height;
 
     // Number of frames held in the buffer. The buffer contains more space
     // than is needed for holding a single frame. This extra space is used to
     // prepare the upcoming frames while the current frame is being sent to
     // the display controller
-    static constexpr std::size_t buf_total_frames = 17;
+    static constexpr std::uint32_t buf_total_frames = 17;
 
     // The MXSFB driver automatically flips to the last frame of the buffer
     // after each vsync (unless we ask for another flip within the next
@@ -131,11 +134,11 @@ private:
     // ensure that a charge is never applied for too long on the EPD, even
     // if there is a bug in our program. This feature is called “prevent frying
     // pan” mode in the MXSFB kernel driver
-    static constexpr std::size_t buf_default_frame = 16;
+    static constexpr std::uint32_t buf_default_frame = 16;
 
     // Number of usable frames, excluding the default frame which
     // we shouldn’t change for reasons stated above
-    static constexpr std::size_t buf_usable_frames = 16;
+    static constexpr std::uint32_t buf_usable_frames = 16;
 
     // State of each frame in the buffer. True if the frame contains data
     // ready to be sent to the controller, false otherwise
@@ -149,10 +152,10 @@ private:
     std::array<std::mutex, buf_total_frames> frame_locks;
 
     // Margins of unused pixels in each frame of the buffer
-    static constexpr std::size_t margin_top = 3;
-    static constexpr std::size_t margin_bottom = 1;
-    static constexpr std::size_t margin_left = 26;
-    static constexpr std::size_t margin_right = 0;
+    static constexpr std::uint32_t margin_top = 3;
+    static constexpr std::uint32_t margin_bottom = 1;
+    static constexpr std::uint32_t margin_left = 26;
+    static constexpr std::uint32_t margin_right = 0;
 
     // Visible screen size. This is expressed in the EPD coordinate system,
     // whose origin is at the bottom right corner of the usual reMarkable
@@ -172,11 +175,11 @@ private:
     //       ++--------------+ |
     //         |         <-----+
     //       Y = height . Y = 0
-    static constexpr std::size_t epd_width
+    static constexpr std::uint32_t epd_width
         = (buf_width - margin_left - margin_right) * buf_actual_depth;
-    static constexpr std::size_t epd_height
+    static constexpr std::uint32_t epd_height
         = buf_height - margin_top - margin_bottom;
-    static constexpr std::size_t epd_size = epd_width * epd_height;
+    static constexpr std::uint32_t epd_size = epd_width * epd_height;
 
     // A static buffer that contains pixels with bytes 1, 2, and 4 set to zero
     // and byte 3 set to its appropriate fixed value. Used for resetting a

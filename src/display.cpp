@@ -3,18 +3,16 @@
 #include <chrono>
 #include <cstring>
 #include <cerrno>
+#include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <unistd.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <bitset>
 
-Display::Display()
-// TODO: Auto-detect appropriate paths rather than hardcoding them
-: Display("/dev/fb0", "/sys/class/hwmon/hwmon1/temp0")
-{}
+namespace fs = std::filesystem;
 
 Display::Display(
     const char* framebuffer_path,
@@ -23,6 +21,58 @@ Display::Display(
 : framebuffer_fd(framebuffer_path, O_RDWR)
 , temperature_sensor_fd(temperature_sensor_path, O_RDONLY)
 {}
+
+auto Display::discover_framebuffer() -> std::optional<std::string>
+{
+    constexpr auto framebuffer_name = "mxs-lcdif";
+
+    for (const auto& entry : fs::directory_iterator{"/sys/class/graphics"}) {
+        std::ifstream name_stream{entry.path() / "name"};
+        std::string name;
+        std::getline(name_stream, name);
+
+        if (name != framebuffer_name) {
+            continue;
+        }
+
+        std::ifstream dev_stream{entry.path() / "dev"};
+        unsigned int major;
+        unsigned int minor;
+        char colon;
+        dev_stream >> major >> colon >> minor;
+
+        std::string dev_path = "/dev/fb" + std::to_string(minor);
+
+        if (fs::exists(dev_path)) {
+            return dev_path;
+        }
+    }
+
+    return {};
+}
+
+auto Display::discover_temperature_sensor() -> std::optional<std::string>
+{
+    constexpr auto sensor_name = "sy7636a_temperature";
+
+    for (const auto& entry : fs::directory_iterator{"/sys/class/hwmon"}) {
+        std::ifstream name_stream{entry.path() / "name"};
+        std::string name;
+        std::getline(name_stream, name);
+
+        if (name != sensor_name) {
+            continue;
+        }
+
+        auto sensor_path = entry.path() / "temp0";
+
+        if (fs::exists(sensor_path)) {
+            return sensor_path;
+        }
+    }
+
+    return {};
+}
 
 Display::~Display()
 {

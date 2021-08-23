@@ -9,6 +9,7 @@
 #include "defs.hpp"
 #include <utility>
 #include <cstdint>
+#include <iostream>
 #include <array>
 #include <vector>
 

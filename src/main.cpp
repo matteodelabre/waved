@@ -12,7 +12,25 @@ int main(int, const char**)
     // TODO: Auto-detect appropriate WBF file from barcode
     auto table = WaveformTable::from_wbf("/usr/share/remarkable/320_R349_AF0411_ED103TC2U2_VB3300-KCD_TC.wbf");
 
-    Display display;
+    auto framebuffer_path = Display::discover_framebuffer();
+
+    if (!framebuffer_path) {
+        std::cerr << "Cannot find framebuffer device\n";
+        return 2;
+    } else {
+        std::cerr << "Using framebuffer device: " << *framebuffer_path << '\n';
+    }
+
+    auto sensor_path = Display::discover_temperature_sensor();
+
+    if (!sensor_path) {
+        std::cerr << "Cannot find temperature sensor\n";
+        return 3;
+    } else {
+        std::cerr << "Using temperature sensor: " << *sensor_path << '\n';
+    }
+
+    Display display{framebuffer_path->data(), sensor_path->data()};
     auto temp = display.get_temperature();
     std::cerr << "Panel temperature: " << temp << " °C\n";
 
