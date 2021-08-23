@@ -6,6 +6,8 @@ _waved_ is aimed at becoming a userspace driver for the reMarkable 2 E-Ink cont
 
 ### Demo
 
+https://user-images.githubusercontent.com/1370040/130524775-c99bc205-9c89-48a3-8a53-34033976a469.mp4
+
 ### Building
 
 To compile the demo, from the [base](https://github.com/toltec-dev/toolchain/pkgs/container/base) Toltec Docker image:
