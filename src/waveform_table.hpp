@@ -12,6 +12,7 @@
 #include <iostream>
 #include <array>
 #include <vector>
+#include <optional>
 
 /**
  * Waveform mode.
@@ -35,6 +36,9 @@ class WaveformTable
 public:
     /** Create an empty waveform table. */
     WaveformTable();
+
+    /** Discover the path to the appropriate WBF file for the current panel. */
+    static std::optional<std::string> discover_wbf_file();
 
     /**
      * Read waveform table definitions from a WBF file.

@@ -23,7 +23,7 @@ if(CMAKE_VERSION VERSION_LESS "3.8")
         message(FATAL_ERROR "Unknown compiler")
     endif()
 else()
-    set_property(TARGET waved PROPERTY CXX_STANDARD 17)
+    set_property(TARGET waved waved-dump-wbf PROPERTY CXX_STANDARD 17)
 endif()
 
 # Disable optimizations in debug mode

@@ -2,9 +2,12 @@
 #include "checksum.tpp"
 #include <algorithm>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <set>
 #include <endian.h>
+
+namespace fs = std::filesystem;
 
 WaveformTable::WaveformTable()
 {}
@@ -136,6 +139,7 @@ constexpr auto expected_fvsn = 1;
 constexpr auto expected_luts = 4;
 constexpr auto expected_advanced_wfm_flags = 3;
 
+/** Parse the header of a WBF file and check its integrity. */
 auto parse_header(const Buffer& buffer) -> wbf_header
 {
     if (buffer.size() < sizeof(wbf_header)) {
@@ -159,19 +163,6 @@ auto parse_header(const Buffer& buffer) -> wbf_header
     header.wmta = le32toh(header.wmta);
 
     // Verify checksums
-    std::uint8_t zeroes[] = {0, 0, 0, 0};
-    std::uint32_t crc_verif = 0;
-    crc_verif = crc32_checksum(crc_verif, zeroes, zeroes + 4);
-    crc_verif = crc32_checksum(crc_verif, begin + 4, buffer.cend());
-
-    if (header.checksum != crc_verif) {
-        std::ostringstream message;
-        message << "Corrupted WBF file: expected CRC32 0x"
-            << std::hex << (int) header.checksum << ", actual 0x"
-            << std::hex << (int) crc_verif;
-        throw std::runtime_error(message.str());
-    }
-
     std::uint8_t checksum1_verif = basic_checksum(begin + 8, begin + 31);
 
     if (header.checksum1 != checksum1_verif) {
@@ -193,14 +184,6 @@ auto parse_header(const Buffer& buffer) -> wbf_header
     }
 
     // Check for expected values
-    if (header.filesize != buffer.size()) {
-        std::ostringstream message;
-        message << "Invalid filesize in WBF header: specified "
-            << header.filesize << " bytes, actual " << buffer.size()
-            << " bytes";
-        throw std::runtime_error(message.str());
-    }
-
     if (header.run_type != expected_run_type) {
         std::ostringstream message;
         message << "Invalid run type in WBF header: expected "
@@ -286,6 +269,7 @@ auto parse_header(const Buffer& buffer) -> wbf_header
     return header;
 }
 
+/** Parse the set of temperature ranges from a WBF file. */
 auto parse_temperatures(
     const wbf_header& header, Buffer::const_iterator& begin
 ) -> std::vector<Temperature>
@@ -315,6 +299,7 @@ auto parse_temperatures(
     return result;
 }
 
+/** Read a pointer field to a WBF file section. */
 auto parse_pointer(Buffer::const_iterator& begin) -> std::uint32_t
 {
     std::uint8_t byte1 = *begin;
@@ -340,6 +325,7 @@ auto parse_pointer(Buffer::const_iterator& begin) -> std::uint32_t
     return pointer;
 }
 
+/** Computes the ordered list of waveform block addresses in a WBF file. */
 auto find_waveform_blocks(
     const wbf_header& header,
     Buffer::const_iterator file_begin,
@@ -362,6 +348,7 @@ auto find_waveform_blocks(
     return {result.begin(), result.end()};
 }
 
+/** Parse a waveform block in a WBF file. */
 auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
 -> Waveform
 {
@@ -422,6 +409,10 @@ auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
     return result;
 }
 
+/**
+ * Parse all waveform blocks of a WBF file and associate them to their
+ * mode and temperature indices.
+ */
 auto parse_waveforms(
     const wbf_header& header,
     const std::vector<std::uint32_t>& blocks,
@@ -477,6 +468,29 @@ auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
     auto it = buffer.cbegin() + sizeof(header);
     result.mode_count = header.mode_count + 1;
 
+    // Check expected size
+    if (header.filesize != buffer.size()) {
+        std::ostringstream message;
+        message << "Invalid filesize in WBF header: specified "
+            << header.filesize << " bytes, actual " << buffer.size()
+            << " bytes";
+        throw std::runtime_error(message.str());
+    }
+
+    // Verify CRC32 checksum
+    std::uint8_t zeroes[] = {0, 0, 0, 0};
+    std::uint32_t crc_verif = 0;
+    crc_verif = crc32_checksum(crc_verif, zeroes, zeroes + 4);
+    crc_verif = crc32_checksum(crc_verif, buffer.cbegin() + 4, buffer.cend());
+
+    if (header.checksum != crc_verif) {
+        std::ostringstream message;
+        message << "Corrupted WBF file: expected CRC32 0x"
+            << std::hex << (int) header.checksum << ", actual 0x"
+            << std::hex << (int) crc_verif;
+        throw std::runtime_error(message.str());
+    }
+
     // Parse temperature table
     result.temperatures = parse_temperatures(header, it);
 
@@ -496,7 +510,7 @@ auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
 
 auto WaveformTable::from_wbf(const char* path) -> WaveformTable
 {
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file{path, std::ios::binary};
 
     if (!file) {
         throw std::system_error(
@@ -505,4 +519,123 @@ auto WaveformTable::from_wbf(const char* path) -> WaveformTable
     }
 
     return WaveformTable::from_wbf(file);
+}
+
+/**
+ * Barcode decoding.
+ *
+ * /dev/mmcblk2boot1 is a 2 MiB-long device that contains a set of
+ * length-prefixed metadata fields. The first field is the device serial
+ * number. The fourth field contains a “barcode” that identifies the EPD, in
+ * particular the front panel laminate (FPL) number. Using this FPL number,
+ * we can find the appropriate WBF file in /usr/share/remarkable.
+ *
+ * Information sourced from:
+ *
+ * - <https://github.com/rmkit-dev/rmkit/issues/35>
+ * - Reverse-engineering Xochitl
+ */
+
+/** Read the set of metadata fields from the metadata device. */
+auto read_metadata() -> std::vector<std::string>
+{
+    std::ifstream device{"/dev/mmcblk2boot1", std::ios::binary};
+    std::vector<std::string> result;
+
+    while (device) {
+        std::uint32_t length;
+        device.read(reinterpret_cast<char*>(&length), sizeof(length));
+        length = be32toh(length);
+
+        if (length == 0) {
+            break;
+        }
+
+        std::string data(length, ' ');
+        device.read(data.data(), length);
+        result.emplace_back(std::move(data));
+    }
+
+    return result;
+}
+
+auto barcode_symbol_to_int(char symbol) -> std::uint16_t
+{
+    if ('0' <= symbol && symbol <= '9') {
+        // 0 - 9 get mapped to 0 - 9
+        return symbol - '0';
+    }
+
+    if ('A' <= symbol && symbol <= 'H') {
+        // A - H get mapped to 10 - 17
+        return symbol - 'A' + 10;
+    } else if ('J' <= symbol && symbol <= 'N') {
+        // J - N get mapped to 18 - 22
+        return symbol - 'J' + 18;
+    } else if ('Q' <= symbol && symbol <= 'Z') {
+        // Q - Z get mapped to 23 - 32
+        return symbol - 'Q' + 23;
+    } else {
+        return -1;
+    }
+}
+
+auto decode_fpl_number(const std::string& barcode) -> std::uint16_t
+{
+    if (barcode.size() < 8) {
+        return -1;
+    }
+
+    auto d6 = barcode_symbol_to_int(barcode[6]);
+    auto d7 = barcode_symbol_to_int(barcode[7]);
+
+    if (d6 == -1 || d7 == -1) {
+        return -1;
+    }
+
+    if (d7 < 10) {
+        // Values from 0 to 329
+        return d7 + d6 * 10;
+    }
+
+    // Values from 330 to 858
+    return d7 + 320 + (d6 - 10) * 23;
+}
+
+auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
+{
+    auto metadata = read_metadata();
+
+    if (metadata.size() < 4) {
+        return {};
+    }
+
+    auto fpl_lot = decode_fpl_number(metadata[3]);
+
+    for (const auto& entry : fs::directory_iterator{"/usr/share/remarkable"}) {
+        if (entry.path().extension().native() != ".wbf") {
+            continue;
+        }
+
+        std::ifstream file{entry.path(), std::ios::binary};
+        Buffer buffer(sizeof(wbf_header));
+        file.read(buffer.data(), buffer.size());
+
+        if (!file) {
+            continue;
+        }
+
+        try {
+            auto header = parse_header(buffer);
+
+            if (header.fpl_lot == fpl_lot) {
+                return entry.path();
+            }
+        } catch (const std::runtime_error& err) {
+            // Ignore malformed files
+            continue;
+        }
+    }
+
+    return {};
 }

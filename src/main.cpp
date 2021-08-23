@@ -9,9 +9,16 @@ int main(int, const char**)
 {
     using namespace std::literals::chrono_literals;
 
-    // TODO: Auto-detect appropriate WBF file from barcode
-    auto table = WaveformTable::from_wbf("/usr/share/remarkable/320_R349_AF0411_ED103TC2U2_VB3300-KCD_TC.wbf");
+    auto wbf_path = WaveformTable::discover_wbf_file();
 
+    if (!wbf_path) {
+        std::cerr << "Cannot find waveform file\n";
+        return 1;
+    } else {
+        std::cerr << "Using waveform file: " << *wbf_path << '\n';
+    }
+
+    auto table = WaveformTable::from_wbf(wbf_path->data());
     auto framebuffer_path = Display::discover_framebuffer();
 
     if (!framebuffer_path) {
