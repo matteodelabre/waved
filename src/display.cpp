@@ -218,8 +218,10 @@ void Display::start()
         }
     }
 
-    // Store a null frame as default frame
-    this->reset_frame(buf_default_frame);
+    // Reset all frames
+    for (std::size_t i = 0; i < buf_total_frames; ++i) {
+        this->reset_frame(i);
+    }
 
     // Start the processing threads
     this->stopping_generator = false;
@@ -509,7 +511,6 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         // We have a time budget of approximately 10 ms to generate each frame
         // otherwise the vsync thread will catch up
         std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
-        this->reset_frame(next_frame);
 
         std::uint8_t* data = frame_base
             + (margin_top + region.top) * buf_stride
@@ -566,15 +567,6 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         condition.notify_one();
         next_frame = (next_frame + 1) % buf_usable_frames;
     }
-}
-
-void Display::reset_frame(std::size_t frame_index)
-{
-    std::copy(
-        this->null_frame.cbegin(),
-        this->null_frame.cend(),
-        this->framebuffer + buf_frame * frame_index
-    );
 }
 
 void Display::commit_update(const Update& update)
@@ -649,6 +641,7 @@ void Display::run_vsync_thread()
         if (first_frame) {
             first_frame = false;
         } else {
+            this->reset_frame(cur_frame);
             this->frame_readiness[cur_frame] = false;
             this->frame_cvs[cur_frame].notify_one();
             cur_lock.unlock();
@@ -660,4 +653,13 @@ void Display::run_vsync_thread()
         next_frame = (next_frame + 1) % buf_usable_frames;
         next_lock = std::unique_lock<std::mutex>(this->frame_locks[next_frame]);
     }
+}
+
+void Display::reset_frame(std::size_t frame_index)
+{
+    std::copy(
+        this->null_frame.cbegin(),
+        this->null_frame.cend(),
+        this->framebuffer + buf_frame * frame_index
+    );
 }
