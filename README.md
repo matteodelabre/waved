@@ -25,10 +25,4 @@ Resulting binaries are `build/waved` (to launch the demo) and `build/waved-dump-
 
 ### Roadmap
 
-* Expose shared memory RGB framebuffer.
-* Implement rm2fb server model.
-* Package in Toltec.
-* Damage tracking (see [mxc\_epdc\_fb\_damage](https://github.com/pl-semiotics/mxc_epdc_fb_damage) & [libqsgepaper-snoop](https://github.com/pl-semiotics/libqsgepaper-snoop)).
-* User configuration (flip screen X/Y, invert colors, set contrast, set sleep timeout, …).
-* Implement “Regal” algorithm.
-* Merge updates.
+See [the issues tab](https://github.com/matteodelabre/waved/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
