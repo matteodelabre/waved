@@ -26,3 +26,7 @@ Resulting binaries are `build/waved` (to launch the demo) and `build/waved-dump-
 ### Roadmap
 
 See [the issues tab](https://github.com/matteodelabre/waved/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
+
+### License
+
+This work is licensed under the GPL v3. See [the full license text](LICENSE.txt).

@@ -1,3 +1,9 @@
+/**
+ * @file
+ * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #include "file_descriptor.hpp"
 #include <system_error>
 #include <cerrno>

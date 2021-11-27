@@ -1,3 +1,9 @@
+/**
+ * @file
+ * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 #ifndef WAVED_DISPLAY_HPP
 #define WAVED_DISPLAY_HPP
 
@@ -18,6 +24,14 @@
 /** Time after which to switch the controller off if no updates are received. */
 constexpr std::chrono::milliseconds power_off_timeout{3000};
 
+/**
+ * Interface for the display controller.
+ *
+ * This class processes update regions and drives the display controller with
+ * appropriate waveforms to display the wanted intensities. It assumes it has
+ * exclusive access to the controller, concurrent access will lead to
+ * unpredictable behavior.
+ */
 class Display
 {
 public:

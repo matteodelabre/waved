@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 cmake_minimum_required(VERSION 3.7)
 project(waved VERSION 0.1.0)
 

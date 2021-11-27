@@ -1,4 +1,8 @@
-/** @file Utility functions to compute various kinds of checksums. */
+/**
+ * @file Utility functions to compute various kinds of checksums.
+ * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 #ifndef WAVED_CHECKSUM_TPP
 #define WAVED_CHECKSUM_TPP

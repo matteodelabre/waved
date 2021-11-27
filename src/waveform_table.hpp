@@ -1,6 +1,7 @@
 /**
  * @file
- * Load electrophoretic display (EPD) waveform definition tables.
+ * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #ifndef WAVED_WAVEFORM_TABLE_HPP
@@ -30,7 +31,7 @@ using Mode = std::uint8_t;
  */
 using Temperature = std::int8_t;
 
-/** Read and use waveform definitions. */
+/** Load an electrophoretic display (EPD) waveform definition table. */
 class WaveformTable
 {
 public:
