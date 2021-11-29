@@ -7,7 +7,9 @@
 #include "display.hpp"
 #include <system_error>
 #include <chrono>
+#include <valarray>
 #include <cstring>
+#include <cmath>
 #include <cerrno>
 #include <fstream>
 #include <filesystem>
@@ -498,6 +500,42 @@ std::vector<bool> Display::check_consecutive(const Update& update)
     return result;
 }
 
+#ifdef REPORT_PERF
+template<typename Value>
+static double valarray_avg(const std::valarray<Value>& values)
+{
+    return static_cast<double>(values.sum()) / values.size();
+}
+
+template<typename Value>
+static double valarray_stddev(const std::valarray<Value>& values)
+{
+    double avg = valarray_avg(values);
+    double dist = 0;
+
+    for (Value val : values) {
+        dist += (val - avg) * (val - avg);
+    }
+
+    return std::sqrt(dist / values.size());
+}
+
+static void print_timing(std::ostream& out, double timing)
+{
+    out << "\033[";
+
+    if (timing < 7'500) {
+        out << "32"; // green
+    } else if (timing < 10'000) {
+        out << "33"; // yellow
+    } else {
+        out << "31"; // red
+    }
+
+    out << "m" << timing << "\033[0m";
+}
+#endif
+
 void Display::generate_frames(std::size_t& next_frame, const Update& update)
 {
     std::vector<bool> is_consecutive = this->check_consecutive(update);
@@ -510,12 +548,11 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
 
 #ifdef REPORT_PERF
     static int update_id = 0;
-    static std::vector<std::int32_t> timings;
-    timings.clear();
-    timings.reserve(update.waveform->size());
+    std::valarray<std::int32_t> timings(update.waveform->size());
 #endif
 
-    for (const auto& matrix : *update.waveform) {
+    for (std::size_t k = 0; k < update.waveform->size(); ++k) {
+        const auto& matrix = (*update.waveform)[k];
         std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
         auto& condition = this->frame_cvs[next_frame];
         auto& ready = this->frame_readiness[next_frame];
@@ -586,31 +623,29 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
 
 #ifdef REPORT_PERF
         const auto end_time = chrono::steady_clock::now();
-        timings.push_back(chrono::duration_cast<chrono::microseconds>(
+        timings[k] = chrono::duration_cast<chrono::microseconds>(
             end_time - start_time
-        ).count());
+        ).count();
 #endif
     }
 
 #ifdef REPORT_PERF
     std::cerr << "[perf] Update #" << update_id << " - ";
-    ++update_id;
+    std::cerr << "min ";
+    print_timing(std::cerr, timings.min());
+    std::cerr << ", avg ";
+    print_timing(std::cerr, valarray_avg(timings));
+    std::cerr << ", stddev " << valarray_stddev(timings) << ", max ";
+    print_timing(std::cerr, timings.max());
+    std::cerr << '\n';
 
     for (const auto& timing : timings) {
-        std::cerr << "\033[";
-
-        if (timing < 7'500) {
-            std::cerr << "32"; // green
-        } else if (timing < 10'000) {
-            std::cerr << "33"; // yellow
-        } else {
-            std::cerr << "31"; // red
-        }
-
-        std::cerr << "m" << timing << "\033[0m ";
+        print_timing(std::cerr, timing);
+        std::cerr << " ";
     }
 
     std::cerr << '\n';
+    ++update_id;
 #endif
 }
 
