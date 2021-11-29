@@ -70,6 +70,9 @@ public:
     const Waveform& lookup(int mode, int temperature) const;
     using Lookup = std::vector<std::vector<std::size_t>>;
 
+    /** Get the display frame rate. */
+    std::uint8_t get_frame_rate() const;
+
     /** Get the available operating temperature thresholds. */
     const std::vector<Temperature>& get_temperatures() const;
 
@@ -77,6 +80,9 @@ public:
     Mode get_mode_count() const;
 
 private:
+    // Display frame rate
+    std::uint8_t frame_rate;
+
     // Number of available modes
     Mode mode_count;
 

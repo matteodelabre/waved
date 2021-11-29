@@ -65,6 +65,11 @@ auto WaveformTable::lookup(int mode, int temperature) const -> const Waveform&
     return this->waveforms[waveform_lookup[mode][range]];
 }
 
+auto WaveformTable::get_frame_rate() const -> std::uint8_t
+{
+    return this->frame_rate;
+}
+
 auto WaveformTable::get_temperatures() const -> const std::vector<Temperature>&
 {
     return this->temperatures;
@@ -139,7 +144,6 @@ constexpr auto expected_adhesive_run = 25;
 constexpr auto expected_waveform_type = 81;
 constexpr auto expected_fpl_size = 0;
 constexpr auto expected_waveform_revision = 0;
-constexpr auto expected_frame_rate = 85;
 constexpr auto expected_vcom_offset = 0;
 constexpr auto expected_fvsn = 1;
 constexpr auto expected_luts = 4;
@@ -233,13 +237,6 @@ auto parse_header(const Buffer& buffer) -> wbf_header
         message << "Invalid waveform revision in WBF header: expected "
             << expected_waveform_revision << ", actual "
             << (int) header.waveform_revision;
-        throw std::runtime_error(message.str());
-    }
-
-    if (header.frame_rate != expected_frame_rate) {
-        std::ostringstream message;
-        message << "Invalid frame rate in WBF header: expected "
-            << expected_frame_rate << ", actual " << (int) header.frame_rate;
         throw std::runtime_error(message.str());
     }
 
@@ -472,6 +469,8 @@ auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
     // Parse WBF header
     wbf_header header = parse_header(buffer);
     auto it = buffer.cbegin() + sizeof(header);
+
+    result.frame_rate = header.frame_rate == 0 ? 85 : header.frame_rate;
     result.mode_count = header.mode_count + 1;
 
     // Check expected size

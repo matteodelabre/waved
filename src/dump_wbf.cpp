@@ -62,10 +62,12 @@ int main(int argc, const char** argv)
         return 1;
     }
 
+    auto frame_rate = table.get_frame_rate();
     auto mode_count = table.get_mode_count();
     auto temps = table.get_temperatures();
 
     if (argc < 2) {
+        std::cout << "Frame rate: " << static_cast<int>(frame_rate) << " Hz\n";
         std::cout << "Available modes: " << static_cast<int>(mode_count) << '\n';
         std::cout << "Temperature ranges:\n";
 
