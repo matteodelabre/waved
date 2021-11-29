@@ -18,6 +18,13 @@ add_executable(waved-dump-wbf
     src/waveform_table.cpp
 )
 
+# Option to enable perf reporting
+option(REPORT_PERF "Report performance information" ON)
+
+if(REPORT_PERF)
+    add_compile_definitions(REPORT_PERF)
+endif()
+
 # Enable C++17 support
 if(CMAKE_VERSION VERSION_LESS "3.8")
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

@@ -19,6 +19,7 @@
 #include <sys/mman.h>
 
 namespace fs = std::filesystem;
+namespace chrono = std::chrono;
 
 Display::Display(
     const char* framebuffer_path,
@@ -507,6 +508,13 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         + region.left;
     const Intensity* next_base = update.buffer.data();
 
+#ifdef REPORT_PERF
+    static int update_id = 0;
+    static std::vector<std::int32_t> timings;
+    timings.clear();
+    timings.reserve(update.waveform->size());
+#endif
+
     for (const auto& matrix : *update.waveform) {
         std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
         auto& condition = this->frame_cvs[next_frame];
@@ -516,6 +524,9 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
 
         // We have a time budget of approximately 10 ms to generate each frame
         // otherwise the vsync thread will catch up
+#ifdef REPORT_PERF
+        const auto start_time = chrono::steady_clock::now();
+#endif
         std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
 
         std::uint8_t* data = frame_base
@@ -572,7 +583,35 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         ready = true;
         condition.notify_one();
         next_frame = (next_frame + 1) % buf_usable_frames;
+
+#ifdef REPORT_PERF
+        const auto end_time = chrono::steady_clock::now();
+        timings.push_back(chrono::duration_cast<chrono::microseconds>(
+            end_time - start_time
+        ).count());
+#endif
     }
+
+#ifdef REPORT_PERF
+    std::cerr << "[perf] Update #" << update_id << " - ";
+    ++update_id;
+
+    for (const auto& timing : timings) {
+        std::cerr << "\033[";
+
+        if (timing < 7'500) {
+            std::cerr << "32"; // green
+        } else if (timing < 10'000) {
+            std::cerr << "33"; // yellow
+        } else {
+            std::cerr << "31"; // red
+        }
+
+        std::cerr << "m" << timing << "\033[0m ";
+    }
+
+    std::cerr << '\n';
+#endif
 }
 
 void Display::commit_update(const Update& update)
