@@ -25,10 +25,12 @@ namespace chrono = std::chrono;
 
 Display::Display(
     const char* framebuffer_path,
-    const char* temperature_sensor_path
+    const char* temperature_sensor_path,
+    WaveformTable waveform_table
 )
-: framebuffer_fd(framebuffer_path, O_RDWR)
-, temperature_sensor_fd(temperature_sensor_path, O_RDONLY)
+: table(std::move(waveform_table))
+, framebuffer_fd(framebuffer_path, O_RDWR)
+, temp_sensor_fd(temperature_sensor_path, O_RDONLY)
 {}
 
 auto Display::discover_framebuffer() -> std::optional<std::string>
@@ -290,17 +292,24 @@ void Display::set_power(bool power_state)
 
 auto Display::get_temperature() -> int
 {
+    if (
+        chrono::steady_clock::now() - this->temp_read_time
+        <= temp_read_interval
+    ) {
+        return this->temp_value;
+    }
+
     char buffer[12];
     ssize_t size = 0;
 
     {
         // The controller needs to be powered on, otherwise
-        // we get a temperature reading of 0 °C
+        // we’ll get a temperature reading of 0 °C
         std::lock_guard<std::mutex> lock(this->power_lock);
         bool old_power_state = this->power_state;
         this->set_power(true);
 
-        if (lseek(this->temperature_sensor_fd, 0, SEEK_SET) != 0) {
+        if (lseek(this->temp_sensor_fd, 0, SEEK_SET) != 0) {
             this->set_power(old_power_state);
             throw std::system_error(
                 errno,
@@ -309,7 +318,7 @@ auto Display::get_temperature() -> int
             );
         }
 
-        size = read(this->temperature_sensor_fd, buffer, sizeof(buffer));
+        size = read(this->temp_sensor_fd, buffer, sizeof(buffer));
 
         if (size == -1) {
             this->set_power(old_power_state);
@@ -329,13 +338,16 @@ auto Display::get_temperature() -> int
         buffer[size] = '\0';
     }
 
-    return std::stoi(buffer);
+    int result = std::stoi(buffer);
+    this->temp_value = result;
+    this->temp_read_time = chrono::steady_clock::now();
+    return result;
 }
 
 bool Display::push_update(
+    Mode mode,
     Region region,
-    const std::vector<Intensity>& buffer,
-    const Waveform* waveform
+    const std::vector<Intensity>& buffer
 )
 {
     if (buffer.size() != region.width * region.height) {
@@ -370,9 +382,9 @@ bool Display::push_update(
 
     std::lock_guard<std::mutex> lock(this->updates_lock);
     this->pending_updates.emplace(Update{
+        mode,
         region,
-        std::move(trans_buffer),
-        waveform
+        std::move(trans_buffer)
     });
 
     this->updates_cv.notify_one();
@@ -545,14 +557,17 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         + region.top * epd_width
         + region.left;
     const Intensity* next_base = update.buffer.data();
+    const Waveform& waveform = this->table.lookup(
+        update.mode, this->get_temperature()
+    );
 
 #ifdef REPORT_PERF
     static int update_id = 0;
-    std::valarray<std::int32_t> timings(update.waveform->size());
+    std::valarray<std::int32_t> timings(waveform.size());
 #endif
 
-    for (std::size_t k = 0; k < update.waveform->size(); ++k) {
-        const auto& matrix = (*update.waveform)[k];
+    for (std::size_t k = 0; k < waveform.size(); ++k) {
+        const auto& matrix = waveform[k];
         std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
         auto& condition = this->frame_cvs[next_frame];
         auto& ready = this->frame_readiness[next_frame];

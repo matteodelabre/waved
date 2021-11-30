@@ -12,19 +12,19 @@
 #include <chrono>
 #include <random>
 
-void do_init(Display& display, const WaveformTable& table, int temp)
+void do_init(Display& display)
 {
     display.push_update(
+        /* mode = */ 0,
         Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
-        std::vector<Intensity>(1404 * 1872, 30),
-        &table.lookup(/* mode = */ 0, temp)
+        std::vector<Intensity>(1404 * 1872, 30)
     );
 }
 
-void do_block_gradients(Display& display, const WaveformTable& table, int temp)
+void do_block_gradients(Display& display)
 {
     constexpr std::size_t block_size = 100;
     constexpr std::size_t block_count = 16;
@@ -40,19 +40,19 @@ void do_block_gradients(Display& display, const WaveformTable& table, int temp)
 
     for (Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
+            mode,
             Region{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
                 /* height = */ block_size * block_count
             },
-            buffer,
-            &table.lookup(mode, temp)
+            buffer
         );
     }
 }
 
-void do_continuous_gradients(Display& display, const WaveformTable& table, int temp)
+void do_continuous_gradients(Display& display)
 {
     constexpr std::size_t block_size = 100;
     constexpr std::size_t block_count = 16;
@@ -71,19 +71,19 @@ void do_continuous_gradients(Display& display, const WaveformTable& table, int t
 
     for (Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
+            mode,
             Region{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
                 /* height = */ block_size * block_count
             },
-            buffer,
-            &table.lookup(mode, temp)
+            buffer
         );
     }
 }
 
-void do_all_diff(Display& display, const WaveformTable& table, int temp)
+void do_all_diff(Display& display)
 {
     std::vector<Intensity> buffer(1404 * 1872);
 
@@ -92,16 +92,16 @@ void do_all_diff(Display& display, const WaveformTable& table, int temp)
     }
 
     display.push_update(
+        /* mode = */ 2,
         Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
-        buffer,
-        &table.lookup(/* mode = */ 2, temp)
+        buffer
     );
 }
 
-void do_random(Display& display, const WaveformTable& table, int temp)
+void do_random(Display& display)
 {
     std::vector<Intensity> buffer(1404 * 1872);
     std::mt19937 generator(424242);
@@ -112,12 +112,12 @@ void do_random(Display& display, const WaveformTable& table, int temp)
     }
 
     display.push_update(
+        /* mode = */ 2,
         Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
-        buffer,
-        &table.lookup(/* mode = */ 2, temp)
+        buffer
     );
 }
 
@@ -155,39 +155,41 @@ int main(int, const char**)
             << *sensor_path << '\n';
     }
 
-    Display display{framebuffer_path->data(), sensor_path->data()};
-    auto temp = display.get_temperature();
-    std::cerr << "[init] Panel temperature: " << temp << " °C\n";
+    Display display{
+        framebuffer_path->data(),
+        sensor_path->data(),
+        std::move(table),
+    };
 
     display.start();
 
     std::cerr << "\n[test] Block gradients\n";
-    do_init(display, table, temp);
-    do_init(display, table, temp);
-    do_block_gradients(display, table, temp);
+    do_init(display);
+    do_init(display);
+    do_block_gradients(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] Continuous gradients\n";
-    do_init(display, table, temp);
-    do_init(display, table, temp);
-    do_continuous_gradients(display, table, temp);
+    do_init(display);
+    do_init(display);
+    do_continuous_gradients(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] All different values\n";
-    do_init(display, table, temp);
-    do_init(display, table, temp);
-    do_all_diff(display, table, temp);
+    do_init(display);
+    do_init(display);
+    do_all_diff(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] Random values\n";
-    do_init(display, table, temp);
-    do_init(display, table, temp);
-    do_random(display, table, temp);
+    do_init(display);
+    do_init(display);
+    do_random(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] End\n";
-    do_init(display, table, temp);
-    do_init(display, table, temp);
+    do_init(display);
+    do_init(display);
     std::this_thread::sleep_for(6s);
     return 0;
 }

@@ -9,6 +9,7 @@
 
 #include "defs.hpp"
 #include "file_descriptor.hpp"
+#include "waveform_table.hpp"
 #include <atomic>
 #include <optional>
 #include <array>
@@ -23,6 +24,9 @@
 
 /** Time after which to switch the controller off if no updates are received. */
 constexpr std::chrono::milliseconds power_off_timeout{3000};
+
+/** Interval at which to take readings of the panel temperature. */
+constexpr std::chrono::seconds temp_read_interval{30};
 
 /**
  * Interface for the display controller.
@@ -40,8 +44,13 @@ public:
      *
      * @param framebuffer_path Path to the framebuffer device.
      * @param temperature_sensor_path Path to the temperature sensor file.
+     * @param waveform_table Display-specific waveform data.
      */
-    Display(const char* framebuffer_path, const char* temperature_sensor_path);
+    Display(
+        const char* framebuffer_path,
+        const char* temperature_sensor_path,
+        WaveformTable waveform_table
+    );
 
     /** Discover the path to framebuffer device. */
     static std::optional<std::string> discover_framebuffer();
@@ -65,12 +74,10 @@ public:
     /** Stop processing updates. */
     void stop();
 
-    /** Get the current display temperature in Celsius. */
-    int get_temperature();
-
     /**
      * Add an update to the queue.
      *
+     * @param mode Update mode to use.
      * @param region Coordinates of the region affected by the update.
      * @param buffer New values for the pixels in the updated region.
      * @param waveform Waveform to use for updating pixels. The waveform object
@@ -78,12 +85,15 @@ public:
      * @return True if the update was pushed, false if it was deemed invalid.
      */
     bool push_update(
+        Mode mode,
         Region region,
-        const std::vector<Intensity>& buffer,
-        const Waveform* waveform
+        const std::vector<Intensity>& buffer
     );
 
 private:
+    // Display-specific waveform information
+    WaveformTable table;
+
     // True if the processing threads have been started
     bool started = false;
 
@@ -105,7 +115,14 @@ private:
     void set_power(bool power_state);
 
     // File descriptor for reading the panel temperature
-    FileDescriptor temperature_sensor_fd;
+    FileDescriptor temp_sensor_fd;
+
+    // Last panel temperature reading and timestamp
+    int temp_value = 0;
+    std::chrono::steady_clock::time_point temp_read_time;
+
+    /** Get the panel temperature. */
+    int get_temperature();
 
     // Structures used for communicating with the display controller
     fb_var_screeninfo var_info{};
@@ -206,14 +223,14 @@ private:
     /** Information about a pending display update. */
     struct Update
     {
+        // Update mode
+        Mode mode;
+
         // Coordinates of the region affected by the update
         Region region{};
 
         // Buffer containing the new intensities of the region
         std::vector<Intensity> buffer;
-
-        // Pointer to the waveform to use for the update
-        const Waveform* waveform = nullptr;
     };
 
     // Queue of pending updates
