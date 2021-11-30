@@ -37,13 +37,20 @@ using Intensity = std::uint8_t;
 constexpr std::uint8_t intensity_values = 1 << 5;
 
 /**
+ * Phase matrix.
+ *
+ * Lookup table that gives the appropriate phase to apply to transition
+ * between two intensities.
+ */
+using PhaseMatrix
+    = std::array<std::array<Phase, intensity_values>, intensity_values>;
+
+/**
  * Waveform.
  *
  * A waveform is a sequence of phases used to transition an EPD cell from a
  * given grayscale intensity to another.
  */
-using PhaseMatrix
-    = std::array<std::array<Phase, intensity_values>, intensity_values>;
 using Waveform = std::vector<PhaseMatrix>;
 
 /** Screen region. */
