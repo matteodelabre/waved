@@ -121,6 +121,37 @@ void do_random(Display& display)
     );
 }
 
+void do_spiral(Display& display)
+{
+    int count = 500;
+    double resol = 20.;
+    double resol_scaling = 0.09;
+    int scale = 75;
+
+    std::uint32_t stencil = 6;
+    std::uint32_t width = 1404;
+    std::uint32_t height = 1872;
+
+    std::vector<Intensity> buffer(stencil * stencil, 0);
+
+    for (int i = 0; i < count; ++i) {
+        auto t = i / (resol + i * resol_scaling);
+        auto ampl = std::exp(0.30635 * t);
+
+        std::uint32_t x = width / 2 + std::round(std::cos(t) * ampl * scale);
+        std::uint32_t y = height / 2 - std::round(std::sin(t) * ampl * scale);
+
+        display.push_update(
+            /* mode = */ 6,
+            Region{
+                /* top = */ y, /* left = */ x,
+                /* width = */ stencil, /* height = */ stencil
+            },
+            buffer
+        );
+    }
+}
+
 int main(int, const char**)
 {
     using namespace std::literals::chrono_literals;
@@ -183,8 +214,13 @@ int main(int, const char**)
     do_random(display);
     std::this_thread::sleep_for(15s);
 
+    std::cerr << "\n[test] Spiral\n";
+    do_init(display);
+    do_spiral(display);
+    std::this_thread::sleep_for(70s);
+
     std::cerr << "\n[test] End\n";
     do_init(display);
-    std::this_thread::sleep_for(6s);
+    std::this_thread::sleep_for(3s);
     return 0;
 }
