@@ -165,30 +165,25 @@ int main(int, const char**)
 
     std::cerr << "\n[test] Block gradients\n";
     do_init(display);
-    do_init(display);
     do_block_gradients(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] Continuous gradients\n";
-    do_init(display);
     do_init(display);
     do_continuous_gradients(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] All different values\n";
     do_init(display);
-    do_init(display);
     do_all_diff(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] Random values\n";
     do_init(display);
-    do_init(display);
     do_random(display);
     std::this_thread::sleep_for(15s);
 
     std::cerr << "\n[test] End\n";
-    do_init(display);
     do_init(display);
     std::this_thread::sleep_for(6s);
     return 0;
