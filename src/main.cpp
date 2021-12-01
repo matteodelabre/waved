@@ -7,6 +7,10 @@
 #include "display.hpp"
 #include "waveform_table.hpp"
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <cerrno>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -152,6 +156,107 @@ void do_spiral(Display& display)
     }
 }
 
+void do_image(Display& display)
+{
+    std::ifstream image{"./image.pgm"};
+
+    if (!image) {
+        std::cerr << "Open ./image.pgm: " << std::strerror(errno) << '\n';
+        return;
+    }
+
+    // Read image header
+    std::string line;
+    int next_field = 0;
+    int width = 0;
+    int height = 0;
+    int maxval = 0;
+
+    while (next_field < 4 && std::getline(image, line)) {
+        if (line[0] == '#') {
+            continue;
+        }
+
+        std::istringstream stream{line};
+
+        while (next_field < 4 && stream) {
+            switch (next_field) {
+            case 0:
+            {
+                std::string type;
+                stream >> type;
+
+                if (type != "P2") {
+                    std::cerr << "Read ./image.pgm: Expected ASCII PGM "
+                        "format (P2), got " << type << '\n';
+                    return;
+                }
+
+                next_field += 1;
+                break;
+            }
+
+            case 1:
+                stream >> width;
+
+                if (!stream.fail()) {
+                    ++next_field;
+                }
+                break;
+
+            case 2:
+                stream >> height;
+
+                if (!stream.fail()) {
+                    ++next_field;
+                }
+                break;
+
+            case 3:
+                stream >> maxval;
+
+                if (!stream.fail()) {
+                    ++next_field;
+                }
+                break;
+            }
+        }
+    }
+
+    // Create buffer from image data
+    std::vector<Intensity> buffer(1404 * 1872, 0);
+
+    for (std::size_t y = 0; y < 1872; ++y) {
+        for (std::size_t x = 0; x < 1404; ++x) {
+            std::getline(image, line);
+            int val = std::stoi(line, nullptr, 10);
+            buffer[y * 1404 + x] = (val * 16) / maxval * 2;
+        }
+
+        // Ignore overflowing pixels
+        for (std::size_t x = 0; x < std::max(0, 1404 - width); ++x) {
+            std::getline(image, line);
+        }
+    }
+
+    for (Mode mode = 1; mode < 8; ++mode) {
+        display.push_update(
+            mode,
+            Region{
+                /* top = */ 0, /* left = */ 0,
+                /* width = */ 1404, /* height = */ 1872
+            },
+            buffer
+        );
+
+        if (mode < 7) {
+            using namespace std::literals::chrono_literals;
+            std::this_thread::sleep_for(5s);
+            do_init(display);
+        }
+    }
+}
+
 int main(int, const char**)
 {
     using namespace std::literals::chrono_literals;
@@ -203,6 +308,11 @@ int main(int, const char**)
     do_init(display);
     do_continuous_gradients(display);
     std::this_thread::sleep_for(15s);
+
+    std::cerr << "\n[test] Image\n";
+    do_init(display);
+    do_image(display);
+    std::this_thread::sleep_for(5s);
 
     std::cerr << "\n[test] All different values\n";
     do_init(display);
