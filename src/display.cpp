@@ -14,6 +14,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <iomanip>
 #include <unistd.h>
 #include <fcntl.h>
 #include <linux/fb.h>
@@ -93,6 +94,7 @@ Display::~Display()
 void Display::start()
 {
     this->set_power(true);
+    this->update_temperature();
 
     if (
         ioctl(
@@ -254,13 +256,8 @@ void Display::stop()
         this->updates_cv.notify_one();
         this->generator_thread.join();
 
-        // Terminate the vsync thread by triggering all the frame cvs
+        // Terminate the vsync thread
         this->stopping_vsync = true;
-
-        for (std::size_t i = 0; i < this->frame_cvs.size(); ++i) {
-            this->frame_cvs[i].notify_one();
-        }
-
         this->vsync_thread.join();
 
         if (this->framebuffer != nullptr) {
@@ -290,46 +287,34 @@ void Display::set_power(bool power_state)
     }
 }
 
-auto Display::get_temperature() -> int
+void Display::update_temperature()
 {
     if (
-        chrono::steady_clock::now() - this->temp_read_time
-        <= temp_read_interval
+        chrono::steady_clock::now() - this->temperature_last_read
+        <= temperature_read_interval
     ) {
-        return this->temp_value;
+        return;
     }
 
     char buffer[12];
     ssize_t size = 0;
 
-    {
-        // The controller needs to be powered on, otherwise
-        // we’ll get a temperature reading of 0 °C
-        std::lock_guard<std::mutex> lock(this->power_lock);
-        bool old_power_state = this->power_state;
-        this->set_power(true);
+    if (lseek(this->temp_sensor_fd, 0, SEEK_SET) != 0) {
+        throw std::system_error(
+            errno,
+            std::generic_category(),
+            "Seek in panel temperature file"
+        );
+    }
 
-        if (lseek(this->temp_sensor_fd, 0, SEEK_SET) != 0) {
-            this->set_power(old_power_state);
-            throw std::system_error(
-                errno,
-                std::generic_category(),
-                "Seek in panel temperature file"
-            );
-        }
+    size = read(this->temp_sensor_fd, buffer, sizeof(buffer));
 
-        size = read(this->temp_sensor_fd, buffer, sizeof(buffer));
-
-        if (size == -1) {
-            this->set_power(old_power_state);
-            throw std::system_error(
-                errno,
-                std::generic_category(),
-                "Read panel temperature"
-            );
-        }
-
-        this->set_power(old_power_state);
+    if (size == -1) {
+        throw std::system_error(
+            errno,
+            std::generic_category(),
+            "Read panel temperature"
+        );
     }
 
     if (static_cast<size_t>(size) >= sizeof(buffer)) {
@@ -339,9 +324,8 @@ auto Display::get_temperature() -> int
     }
 
     int result = std::stoi(buffer);
-    this->temp_value = result;
-    this->temp_read_time = chrono::steady_clock::now();
-    return result;
+    this->temperature = result;
+    this->temperature_last_read = chrono::steady_clock::now();
 }
 
 bool Display::push_update(
@@ -393,15 +377,13 @@ bool Display::push_update(
 
 void Display::run_generator_thread()
 {
-    std::size_t next_frame = 0;
-
     while (!this->stopping_generator) {
         std::optional<Update> maybe_update = this->pop_update();
 
         if (maybe_update) {
             Update& update = *maybe_update;
             this->align_update(update);
-            this->generate_frames(next_frame, update);
+            this->generate_frames(update);
             this->commit_update(update);
         }
     }
@@ -514,16 +496,16 @@ std::vector<bool> Display::check_consecutive(const Update& update)
 
 #ifdef REPORT_PERF
 template<typename Value>
-static double valarray_avg(const std::valarray<Value>& values)
+static int valarray_avg(const std::valarray<Value>& values)
 {
-    return static_cast<double>(values.sum()) / values.size();
+    return values.sum() / values.size();
 }
 
 template<typename Value>
-static double valarray_stddev(const std::valarray<Value>& values)
+static int valarray_stddev(const std::valarray<Value>& values)
 {
-    double avg = valarray_avg(values);
-    double dist = 0;
+    int avg = valarray_avg(values);
+    int dist = 0;
 
     for (Value val : values) {
         dist += (val - avg) * (val - avg);
@@ -532,7 +514,7 @@ static double valarray_stddev(const std::valarray<Value>& values)
     return std::sqrt(dist / values.size());
 }
 
-static void print_timing(std::ostream& out, double timing)
+static void print_frame_timing(std::ostream& out, int timing)
 {
     out << "\033[";
 
@@ -544,11 +526,11 @@ static void print_timing(std::ostream& out, double timing)
         out << "31"; // red
     }
 
-    out << "m" << timing << "\033[0m";
+    out << "m" << std::setw(5) << timing << "\033[0m";
 }
 #endif
 
-void Display::generate_frames(std::size_t& next_frame, const Update& update)
+void Display::generate_frames(const Update& update)
 {
     std::vector<bool> is_consecutive = this->check_consecutive(update);
     const auto& region = update.region;
@@ -558,7 +540,7 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
         + region.left;
     const Intensity* next_base = update.buffer.data();
     const Waveform& waveform = this->table.lookup(
-        update.mode, this->get_temperature()
+        update.mode, this->temperature
     );
 
 #ifdef REPORT_PERF
@@ -566,25 +548,20 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
     std::valarray<std::int32_t> timings(waveform.size());
 #endif
 
+    this->work_buffer.clear();
+    this->work_buffer.reserve(waveform.size());
+
     for (std::size_t k = 0; k < waveform.size(); ++k) {
-        const auto& matrix = waveform[k];
-        std::unique_lock<std::mutex> lock(this->frame_locks[next_frame]);
-        auto& condition = this->frame_cvs[next_frame];
-        auto& ready = this->frame_readiness[next_frame];
-
-        condition.wait(lock, [&ready] { return !ready; });
-
-        // We have a time budget of approximately 10 ms to generate each frame
-        // otherwise the vsync thread will catch up
 #ifdef REPORT_PERF
         const auto start_time = chrono::steady_clock::now();
 #endif
-        std::uint8_t* frame_base = this->framebuffer + buf_frame * next_frame;
 
-        std::uint8_t* data = frame_base
+        this->work_buffer.emplace_back(this->null_frame);
+        std::uint8_t* data = this->work_buffer.back().data()
             + (margin_top + region.top) * buf_stride
             + (margin_left + region.left / buf_actual_depth) * buf_depth;
 
+        const auto& matrix = waveform[k];
         const Intensity* prev = prev_base;
         const Intensity* next = next_base;
 
@@ -632,10 +609,6 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
             data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
         }
 
-        ready = true;
-        condition.notify_one();
-        next_frame = (next_frame + 1) % buf_usable_frames;
-
 #ifdef REPORT_PERF
         const auto end_time = chrono::steady_clock::now();
         timings[k] = chrono::duration_cast<chrono::microseconds>(
@@ -645,23 +618,28 @@ void Display::generate_frames(std::size_t& next_frame, const Update& update)
     }
 
 #ifdef REPORT_PERF
-    std::cerr << "[perf] Update #" << update_id << " - ";
-    std::cerr << "min ";
-    print_timing(std::cerr, timings.min());
+    std::cerr << "[perf] Update #" << std::setw(3) << update_id << " - ";
+    std::cerr << "gen time " << std::setw(7) << timings.sum() << " (frame min ";
+    print_frame_timing(std::cerr, timings.min());
     std::cerr << ", avg ";
-    print_timing(std::cerr, valarray_avg(timings));
+    print_frame_timing(std::cerr, valarray_avg(timings));
     std::cerr << ", stddev " << valarray_stddev(timings) << ", max ";
-    print_timing(std::cerr, timings.max());
-    std::cerr << '\n';
-
-    for (const auto& timing : timings) {
-        print_timing(std::cerr, timing);
-        std::cerr << " ";
-    }
-
-    std::cerr << '\n';
+    print_frame_timing(std::cerr, timings.max());
+    std::cerr << ")\n";
     ++update_id;
 #endif
+
+    {
+        std::unique_lock<std::mutex> lock(this->live_write_lock);
+        this->live_can_write_cv.wait(lock, [this] {
+            return this->live_can_write || this->stopping_generator;
+        });
+        std::swap(this->live_buffer, this->work_buffer);
+    }
+
+    this->live_can_write = false;
+    this->live_can_read = true;
+    this->live_can_read_cv.notify_one();
 }
 
 void Display::commit_update(const Update& update)
@@ -681,38 +659,40 @@ void Display::commit_update(const Update& update)
 
 void Display::run_vsync_thread()
 {
+    std::size_t next_frame = 0;
     bool first_frame = true;
 
-    std::size_t cur_frame = 0;
-    std::unique_lock<std::mutex> cur_lock;
-
-    std::size_t next_frame = 0;
-    std::unique_lock<std::mutex> next_lock(this->frame_locks[next_frame]);
-
     while (!this->stopping_vsync) {
-        auto& next_condition = this->frame_cvs[next_frame];
-        auto& next_ready = this->frame_readiness[next_frame];
-        const auto pred = [&next_ready, this] {
-            return next_ready || this->stopping_vsync;
-        };
+        {
+            // Wait for the next update to be ready
+            std::unique_lock<std::mutex> lock(this->live_read_lock);
+            const auto pred = [this] {
+                return this->live_can_read || this->stopping_vsync;
+            };
 
-        if (!next_condition.wait_for(next_lock, power_off_timeout, pred)) {
-            {
+            if (!this->live_can_read_cv.wait_for(lock, power_off_timeout, pred)) {
                 // Turn off power to save battery when no updates are coming
-                std::lock_guard<std::mutex> lock(this->power_lock);
                 this->set_power(false);
+                this->live_can_read_cv.wait(lock, pred);
             }
-
-            next_condition.wait(next_lock, pred);
         }
 
         if (this->stopping_vsync) {
             return;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(this->power_lock);
-            this->set_power(true);
+        this->set_power(true);
+        this->update_temperature();
+
+        for (std::size_t k = 0; k < this->live_buffer.size(); ++k) {
+            next_frame = (next_frame + 1) % 2;
+
+            std::memcpy(
+                this->framebuffer + next_frame * buf_frame,
+                this->live_buffer[k].data(),
+                this->live_buffer[k].size()
+            );
+
             this->var_info.yoffset = next_frame * buf_height;
 
             if (
@@ -731,22 +711,13 @@ void Display::run_vsync_thread()
                 std::cerr << "Vsync and flip: " << std::strerror(errno) << '\n';
                 return;
             }
-        }
 
-        if (first_frame) {
             first_frame = false;
-        } else {
-            this->reset_frame(cur_frame);
-            this->frame_readiness[cur_frame] = false;
-            this->frame_cvs[cur_frame].notify_one();
-            cur_lock.unlock();
         }
 
-        cur_frame = next_frame;
-        cur_lock = std::move(next_lock);
-
-        next_frame = (next_frame + 1) % buf_usable_frames;
-        next_lock = std::unique_lock<std::mutex>(this->frame_locks[next_frame]);
+        this->live_can_write = true;
+        this->live_can_read = false;
+        this->live_can_write_cv.notify_one();
     }
 }
 

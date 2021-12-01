@@ -22,12 +22,6 @@
 #include <cstdint>
 #include <linux/fb.h>
 
-/** Time after which to switch the controller off if no updates are received. */
-constexpr std::chrono::milliseconds power_off_timeout{3000};
-
-/** Interval at which to take readings of the panel temperature. */
-constexpr std::chrono::seconds temp_read_interval{30};
-
 /**
  * Interface for the display controller.
  *
@@ -107,22 +101,27 @@ private:
     // Pointer to the mmap’ed framebuffer
     std::uint8_t* framebuffer = nullptr;
 
+    // Time after which to switch the controller off if no updates are received
+    static constexpr std::chrono::milliseconds power_off_timeout{3000};
+
     // True if the display is powered on
     bool power_state = false;
-    std::mutex power_lock;
 
     /** Turn the display controller on or off. */
     void set_power(bool power_state);
+
+    // Interval at which to take readings of the panel temperature
+    static constexpr std::chrono::seconds temperature_read_interval{30};
 
     // File descriptor for reading the panel temperature
     FileDescriptor temp_sensor_fd;
 
     // Last panel temperature reading and timestamp
-    int temp_value = 0;
-    std::chrono::steady_clock::time_point temp_read_time;
+    int temperature = 0;
+    std::chrono::steady_clock::time_point temperature_last_read;
 
-    /** Get the panel temperature. */
-    int get_temperature();
+    /** Update the panel temperature reading, if needed. */
+    void update_temperature();
 
     // Structures used for communicating with the display controller
     fb_var_screeninfo var_info{};
@@ -153,6 +152,9 @@ private:
     // Total size of a frame in bytes
     static constexpr std::uint32_t buf_frame = buf_stride * buf_height;
 
+    // Buffer type for a single frame
+    using Frame = std::array<std::uint8_t, buf_frame>;
+
     // Number of frames held in the buffer. The buffer contains more space
     // than is needed for holding a single frame. This extra space is used to
     // prepare the upcoming frames while the current frame is being sent to
@@ -170,17 +172,6 @@ private:
     // Number of usable frames, excluding the default frame which
     // we shouldn’t change for reasons stated above
     static constexpr std::uint32_t buf_usable_frames = 16;
-
-    // State of each frame in the buffer. True if the frame contains data
-    // ready to be sent to the controller, false otherwise
-    std::array<bool, buf_total_frames> frame_readiness;
-
-    // Set of condition variables used to notify threads when the readiness
-    // state of a frame changes
-    std::array<std::condition_variable, buf_total_frames> frame_cvs;
-
-    // Set of mutexes used to lock access to each frame
-    std::array<std::mutex, buf_total_frames> frame_locks;
 
     // Margins of unused pixels in each frame of the buffer
     static constexpr std::uint32_t margin_top = 3;
@@ -212,11 +203,6 @@ private:
         = buf_height - margin_top - margin_bottom;
     static constexpr std::uint32_t epd_size = epd_width * epd_height;
 
-    // A static buffer that contains pixels with bytes 1, 2, and 4 set to zero
-    // and byte 3 set to its appropriate fixed value. Used for resetting a
-    // frame when preparing it
-    std::array<std::uint8_t, buf_frame> null_frame{};
-
     // Buffer holding the current known intensity state of all display cells
     std::array<Intensity, epd_size> current_intensity{};
 
@@ -238,6 +224,26 @@ private:
     std::condition_variable updates_cv;
     std::mutex updates_lock;
 
+    // Frame that leaves cell intensities unchanged
+    Frame null_frame{};
+
+    // Buffer to which to generator thread will write to generate frames
+    // for each update
+    std::vector<Frame> work_buffer{};
+
+    // Buffer from which the vsync thread will read to send frames
+    // to the display
+    std::vector<Frame> live_buffer{};
+
+    // Locks to read from or write to the live buffer
+    std::atomic<bool> live_can_read = false;
+    std::condition_variable live_can_read_cv;
+    std::mutex live_read_lock;
+
+    std::atomic<bool> live_can_write = true;
+    std::condition_variable live_can_write_cv;
+    std::mutex live_write_lock;
+
     /** Thread that processes update requests and generates frames. */
     std::thread generator_thread;
     void run_generator_thread();
@@ -252,7 +258,7 @@ private:
     std::vector<bool> check_consecutive(const Update& update);
 
     /** Prepare phase frames for the given update. */
-    void generate_frames(std::size_t& next_frame, const Update& update);
+    void generate_frames(const Update& update);
 
     /** Store a null frame at the given buffer location. */
     void reset_frame(std::size_t frame_index);
