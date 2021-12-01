@@ -19,6 +19,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdlib>
+#include <sstream>
 #include <cstdint>
 #include <linux/fb.h>
 
@@ -83,6 +84,14 @@ public:
         Region region,
         const std::vector<Intensity>& buffer
     );
+
+#ifdef ENABLE_PERF_REPORT
+    /** Get the performance report as a CSV string. */
+    std::string get_perf_report() const;
+#endif
+
+    /** Unique identifier for an update being processed. */
+    using UpdateID = std::uint32_t;
 
 private:
     // Display-specific waveform information
@@ -206,9 +215,13 @@ private:
     // Buffer holding the current known intensity state of all display cells
     std::array<Intensity, epd_size> current_intensity{};
 
-    /** Information about a pending display update. */
+    static UpdateID next_update_id;
+
+    /** Information about a display update being processed. */
     struct Update
     {
+        UpdateID id;
+
         // Update mode
         Mode mode;
 
@@ -217,6 +230,26 @@ private:
 
         // Buffer containing the new intensities of the region
         std::vector<Intensity> buffer;
+
+#ifdef ENABLE_PERF_REPORT
+        // Time of creation and addition to the update queue
+        std::chrono::steady_clock::time_point queue_time;
+
+        // Time of removal from the update queue
+        std::chrono::steady_clock::time_point dequeue_time;
+
+        // Start time of frame generation
+        std::chrono::steady_clock::time_point generate_start_time;
+
+        // End time of frame generation
+        std::chrono::steady_clock::time_point generate_end_time;
+
+        // Start time of frame vsync
+        std::chrono::steady_clock::time_point vsync_start_time;
+
+        // End time of frame vsync
+        std::chrono::steady_clock::time_point vsync_end_time;
+#endif // ENABLE_PERF_REPORT
     };
 
     // Queue of pending updates
@@ -229,46 +262,68 @@ private:
 
     // Buffer to which to generator thread will write to generate frames
     // for each update
-    std::vector<Frame> work_buffer{};
+    std::vector<Frame> generate_buffer{};
+
+    // Update for which frames are currently being generated
+    Update generate_update;
 
     // Buffer from which the vsync thread will read to send frames
     // to the display
-    std::vector<Frame> live_buffer{};
+    std::vector<Frame> vsync_buffer{};
 
-    // Locks to read from or write to the live buffer
-    std::atomic<bool> live_can_read = false;
-    std::condition_variable live_can_read_cv;
-    std::mutex live_read_lock;
+    // Update for which frames are currently being vsynced
+    Update vsync_update;
 
-    std::atomic<bool> live_can_write = true;
-    std::condition_variable live_can_write_cv;
-    std::mutex live_write_lock;
+    // Locks to read from or write to the vsync buffer
+    std::atomic<bool> vsync_can_read = false;
+    std::condition_variable vsync_can_read_cv;
+    std::mutex vsync_read_lock;
+
+    std::atomic<bool> vsync_can_write = true;
+    std::condition_variable vsync_can_write_cv;
+    std::mutex vsync_write_lock;
+
+#ifdef ENABLE_PERF_REPORT
+    std::ostringstream perf_report;
+#endif
 
     /** Thread that processes update requests and generates frames. */
     std::thread generator_thread;
     void run_generator_thread();
 
-    /** Remove the next update from the queue (or wait if queue is empty). */
-    std::optional<Update> pop_update();
+    /**
+     * Remove the next update from the queue (or wait if queue is empty).
+     *
+     * The new update is placed in `generate_update`.
+     *
+     * @return True if a new update is available, false if the generator
+     * thread should stop.
+     */
+    bool pop_update();
 
-    /** Align an update on a 8-pixel boundary on the X axis. */
-    void align_update(Update& update);
+    /** Align update on a 8-pixel boundary on the X axis. */
+    void align_update();
 
-    /** Scan an update to find pixel transitions equal to their predecessor. */
-    std::vector<bool> check_consecutive(const Update& update);
+    /** Scan update to find pixel transitions equal to their predecessor. */
+    std::vector<bool> check_consecutive();
 
-    /** Prepare phase frames for the given update. */
-    void generate_frames(const Update& update);
+    /** Prepare phase frames for the current update. */
+    void generate_frames();
 
     /** Store a null frame at the given buffer location. */
     void reset_frame(std::size_t frame_index);
 
-    /** Update current_intensity status with the given finished update. */
-    void commit_update(const Update& update);
+    /** Update current_intensity status with the current update. */
+    void commit_update();
 
     /** Thread that sends ready frames to the display controller via vsync. */
     std::thread vsync_thread;
     void run_vsync_thread();
+
+#ifdef ENABLE_PERF_REPORT
+    /** Add perf report record for finished update. */
+    void make_perf_record();
+#endif // ENABLE_PERF_REPORT
 };
 
 #endif // WAVED_DISPLAY_HPP

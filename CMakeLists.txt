@@ -19,10 +19,10 @@ add_executable(waved-dump-wbf
 )
 
 # Option to enable perf reporting
-option(REPORT_PERF "Report performance information" ON)
+option(ENABLE_PERF_REPORT "Report performance information" ON)
 
-if(REPORT_PERF)
-    add_compile_definitions(REPORT_PERF)
+if(ENABLE_PERF_REPORT)
+    add_compile_definitions(ENABLE_PERF_REPORT)
 endif()
 
 # Enable C++17 support

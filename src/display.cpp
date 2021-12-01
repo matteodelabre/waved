@@ -7,7 +7,6 @@
 #include "display.hpp"
 #include <system_error>
 #include <chrono>
-#include <valarray>
 #include <cstring>
 #include <cmath>
 #include <cerrno>
@@ -23,6 +22,8 @@
 
 namespace fs = std::filesystem;
 namespace chrono = std::chrono;
+
+Display::UpdateID Display::next_update_id = 0;
 
 Display::Display(
     const char* framebuffer_path,
@@ -366,9 +367,13 @@ bool Display::push_update(
 
     std::lock_guard<std::mutex> lock(this->updates_lock);
     this->pending_updates.emplace(Update{
-        mode,
-        region,
-        std::move(trans_buffer)
+        this->next_update_id++
+        , mode
+        , region
+        , std::move(trans_buffer)
+#ifdef ENABLE_PERF_REPORT
+        , /* queue_time = */ chrono::steady_clock::now(),
+#endif // ENABLE_PERF_REPORT
     });
 
     this->updates_cv.notify_one();
@@ -378,18 +383,15 @@ bool Display::push_update(
 void Display::run_generator_thread()
 {
     while (!this->stopping_generator) {
-        std::optional<Update> maybe_update = this->pop_update();
-
-        if (maybe_update) {
-            Update& update = *maybe_update;
-            this->align_update(update);
-            this->generate_frames(update);
-            this->commit_update(update);
+        if (this->pop_update()) {
+            this->align_update();
+            this->generate_frames();
+            this->commit_update();
         }
     }
 }
 
-std::optional<Display::Update> Display::pop_update()
+bool Display::pop_update()
 {
     std::unique_lock<std::mutex> lock(this->updates_lock);
     this->updates_cv.wait(lock, [this] {
@@ -397,17 +399,21 @@ std::optional<Display::Update> Display::pop_update()
     });
 
     if (this->stopping_generator) {
-        return {};
+        return false;
     }
 
-    Update update = std::move(this->pending_updates.front());
+    this->generate_update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
-    return update;
+#ifdef ENABLE_PERF_REPORT
+    this->generate_update.dequeue_time = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
+    return true;
 }
 
-void Display::align_update(Update& update)
+void Display::align_update()
 {
     constexpr auto mask = buf_actual_depth - 1;
+    auto& update = this->generate_update;
 
     if (
         update.region.width & mask == 0
@@ -453,8 +459,9 @@ void Display::align_update(Update& update)
     update.region.width = new_width;
 }
 
-std::vector<bool> Display::check_consecutive(const Update& update)
+std::vector<bool> Display::check_consecutive()
 {
+    const auto& update = this->generate_update;
     const auto& region = update.region;
     std::vector<bool> result(region.height * region.width / buf_actual_depth);
 
@@ -494,47 +501,15 @@ std::vector<bool> Display::check_consecutive(const Update& update)
     return result;
 }
 
-#ifdef REPORT_PERF
-template<typename Value>
-static int valarray_avg(const std::valarray<Value>& values)
+void Display::generate_frames()
 {
-    return values.sum() / values.size();
-}
+    std::vector<bool> is_consecutive = this->check_consecutive();
+    auto& update = this->generate_update;
+#if ENABLE_PERF_REPORT
+    update.generate_start_time = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
 
-template<typename Value>
-static int valarray_stddev(const std::valarray<Value>& values)
-{
-    int avg = valarray_avg(values);
-    int dist = 0;
-
-    for (Value val : values) {
-        dist += (val - avg) * (val - avg);
-    }
-
-    return std::sqrt(dist / values.size());
-}
-
-static void print_frame_timing(std::ostream& out, int timing)
-{
-    out << "\033[";
-
-    if (timing < 7'500) {
-        out << "32"; // green
-    } else if (timing < 10'000) {
-        out << "33"; // yellow
-    } else {
-        out << "31"; // red
-    }
-
-    out << "m" << std::setw(5) << timing << "\033[0m";
-}
-#endif
-
-void Display::generate_frames(const Update& update)
-{
-    std::vector<bool> is_consecutive = this->check_consecutive(update);
     const auto& region = update.region;
-
     const Intensity* prev_base = this->current_intensity.data()
         + region.top * epd_width
         + region.left;
@@ -543,21 +518,16 @@ void Display::generate_frames(const Update& update)
         update.mode, this->temperature
     );
 
-#ifdef REPORT_PERF
-    static int update_id = 0;
-    std::valarray<std::int32_t> timings(waveform.size());
-#endif
-
-    this->work_buffer.clear();
-    this->work_buffer.reserve(waveform.size());
+    this->generate_buffer.clear();
+    this->generate_buffer.reserve(waveform.size());
 
     for (std::size_t k = 0; k < waveform.size(); ++k) {
-#ifdef REPORT_PERF
+#ifdef ENABLE_PERF_REPORT
         const auto start_time = chrono::steady_clock::now();
-#endif
+#endif // ENABLE_PERF_REPORT
 
-        this->work_buffer.emplace_back(this->null_frame);
-        std::uint8_t* data = this->work_buffer.back().data()
+        this->generate_buffer.emplace_back(this->null_frame);
+        std::uint8_t* data = this->generate_buffer.back().data()
             + (margin_top + region.top) * buf_stride
             + (margin_left + region.left / buf_actual_depth) * buf_depth;
 
@@ -609,41 +579,32 @@ void Display::generate_frames(const Update& update)
             data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
         }
 
-#ifdef REPORT_PERF
+#ifdef ENABLE_PERF_REPORT
         const auto end_time = chrono::steady_clock::now();
-        timings[k] = chrono::duration_cast<chrono::microseconds>(
-            end_time - start_time
-        ).count();
-#endif
+#endif // ENABLE_PERF_REPORT
     }
 
-#ifdef REPORT_PERF
-    std::cerr << "[perf] Update #" << std::setw(3) << update_id << " - ";
-    std::cerr << "gen time " << std::setw(7) << timings.sum() << " (frame min ";
-    print_frame_timing(std::cerr, timings.min());
-    std::cerr << ", avg ";
-    print_frame_timing(std::cerr, valarray_avg(timings));
-    std::cerr << ", stddev " << valarray_stddev(timings) << ", max ";
-    print_frame_timing(std::cerr, timings.max());
-    std::cerr << ")\n";
-    ++update_id;
-#endif
+#ifdef ENABLE_PERF_REPORT
+    update.generate_end_time = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
 
     {
-        std::unique_lock<std::mutex> lock(this->live_write_lock);
-        this->live_can_write_cv.wait(lock, [this] {
-            return this->live_can_write || this->stopping_generator;
+        std::unique_lock<std::mutex> lock(this->vsync_write_lock);
+        this->vsync_can_write_cv.wait(lock, [this] {
+            return this->vsync_can_write || this->stopping_generator;
         });
-        std::swap(this->live_buffer, this->work_buffer);
+        this->vsync_update = this->generate_update;
+        std::swap(this->generate_buffer, this->vsync_buffer);
     }
 
-    this->live_can_write = false;
-    this->live_can_read = true;
-    this->live_can_read_cv.notify_one();
+    this->vsync_can_write = false;
+    this->vsync_can_read = true;
+    this->vsync_can_read_cv.notify_one();
 }
 
-void Display::commit_update(const Update& update)
+void Display::commit_update()
 {
+    const auto& update = this->generate_update;
     const auto& region = update.region;
 
     Intensity* prev = this->current_intensity.data()
@@ -665,15 +626,15 @@ void Display::run_vsync_thread()
     while (!this->stopping_vsync) {
         {
             // Wait for the next update to be ready
-            std::unique_lock<std::mutex> lock(this->live_read_lock);
+            std::unique_lock<std::mutex> lock(this->vsync_read_lock);
             const auto pred = [this] {
-                return this->live_can_read || this->stopping_vsync;
+                return this->vsync_can_read || this->stopping_vsync;
             };
 
-            if (!this->live_can_read_cv.wait_for(lock, power_off_timeout, pred)) {
+            if (!this->vsync_can_read_cv.wait_for(lock, power_off_timeout, pred)) {
                 // Turn off power to save battery when no updates are coming
                 this->set_power(false);
-                this->live_can_read_cv.wait(lock, pred);
+                this->vsync_can_read_cv.wait(lock, pred);
             }
         }
 
@@ -681,16 +642,21 @@ void Display::run_vsync_thread()
             return;
         }
 
+        Update& update = this->vsync_update;
+#if ENABLE_PERF_REPORT
+        update.vsync_start_time = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
+
         this->set_power(true);
         this->update_temperature();
 
-        for (std::size_t k = 0; k < this->live_buffer.size(); ++k) {
+        for (std::size_t k = 0; k < this->vsync_buffer.size(); ++k) {
             next_frame = (next_frame + 1) % 2;
 
             std::memcpy(
                 this->framebuffer + next_frame * buf_frame,
-                this->live_buffer[k].data(),
-                this->live_buffer[k].size()
+                this->vsync_buffer[k].data(),
+                this->vsync_buffer[k].size()
             );
 
             this->var_info.yoffset = next_frame * buf_height;
@@ -715,9 +681,14 @@ void Display::run_vsync_thread()
             first_frame = false;
         }
 
-        this->live_can_write = true;
-        this->live_can_read = false;
-        this->live_can_write_cv.notify_one();
+#ifdef ENABLE_PERF_REPORT
+        update.vsync_end_time = chrono::steady_clock::now();
+        this->make_perf_record();
+#endif // ENABLE_PERF_REPORT
+
+        this->vsync_can_write = true;
+        this->vsync_can_read = false;
+        this->vsync_can_write_cv.notify_one();
     }
 }
 
@@ -729,3 +700,36 @@ void Display::reset_frame(std::size_t frame_index)
         this->framebuffer + buf_frame * frame_index
     );
 }
+
+#ifdef ENABLE_PERF_REPORT
+inline std::uint64_t epoch_time(chrono::steady_clock::time_point t)
+{
+    return chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
+        .count();
+}
+
+void Display::make_perf_record()
+{
+    const auto& update = this->vsync_update;
+    this->perf_report << update.id << ','
+        << static_cast<int>(update.mode) << ','
+        << update.region.width << ','
+        << update.region.height << ','
+        << epoch_time(update.queue_time) << ','
+        << epoch_time(update.dequeue_time) << ','
+        << epoch_time(update.generate_start_time) << ','
+        << epoch_time(update.generate_end_time) << ','
+        << epoch_time(update.vsync_start_time) << ','
+        << epoch_time(update.vsync_end_time) << '\n';
+}
+
+std::string Display::get_perf_report() const
+{
+    return (
+        "id,mode,width,height,queue_time,dequeue_time,"
+        "generate_start_time,generate_end_time,"
+        "vsync_start_time,vsync_end_time\n"
+        + this->perf_report.str()
+    );
+}
+#endif // ENABLE_PERF_REPORT

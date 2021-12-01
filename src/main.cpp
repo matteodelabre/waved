@@ -257,9 +257,47 @@ void do_image(Display& display)
     }
 }
 
-int main(int, const char**)
+void print_help(std::ostream& out, const char* name)
+{
+#ifdef ENABLE_PERF_REPORT
+    out << "Usage: " << name << " [-h|--help] [PERF_OUT]\n";
+#else
+    out << "Usage: " << name << " [-h|--help]\n";
+#endif
+    out << "Run tests of the EPDC driver.\n";
+#ifdef ENABLE_PERF_REPORT
+    out << "Dump performance report in PERF_OUT (in CSV format).\n";
+#else
+    out << "Performance reports disabled at compile time.\n";
+#endif
+}
+
+inline void next_arg(int& argc, const char**& argv)
+{
+    --argc;
+    ++argv;
+}
+
+int main(int argc, const char** argv)
 {
     using namespace std::literals::chrono_literals;
+    const char* name = argv[0];
+    bool from_file = false;
+    next_arg(argc, argv);
+
+    if (argc && (argv[0] == std::string("-h") || argv[0] == std::string("--help"))) {
+        print_help(std::cout, name);
+        return 0;
+    }
+
+#ifdef ENABLE_PERF_REPORT
+    std::ofstream perf_report_out;
+
+    if (argc) {
+        perf_report_out.open(argv[0]);
+        next_arg(argc, argv);
+    }
+#endif
 
     auto wbf_path = WaveformTable::discover_wbf_file();
 
@@ -299,38 +337,45 @@ int main(int, const char**)
 
     display.start();
 
-    std::cerr << "\n[test] Block gradients\n";
+    std::cerr << "[test] Block gradients\n";
     do_init(display);
     do_block_gradients(display);
     std::this_thread::sleep_for(15s);
 
-    std::cerr << "\n[test] Continuous gradients\n";
+    std::cerr << "[test] Continuous gradients\n";
     do_init(display);
     do_continuous_gradients(display);
     std::this_thread::sleep_for(15s);
 
-    std::cerr << "\n[test] Image\n";
+    std::cerr << "[test] Image\n";
     do_init(display);
     do_image(display);
     std::this_thread::sleep_for(5s);
 
-    std::cerr << "\n[test] All different values\n";
+    std::cerr << "[test] All different values\n";
     do_init(display);
     do_all_diff(display);
     std::this_thread::sleep_for(15s);
 
-    std::cerr << "\n[test] Random values\n";
+    std::cerr << "[test] Random values\n";
     do_init(display);
     do_random(display);
     std::this_thread::sleep_for(15s);
 
-    std::cerr << "\n[test] Spiral\n";
+    std::cerr << "[test] Spiral\n";
     do_init(display);
     do_spiral(display);
     std::this_thread::sleep_for(70s);
 
-    std::cerr << "\n[test] End\n";
+    std::cerr << "[test] End\n";
     do_init(display);
     std::this_thread::sleep_for(3s);
+
+#ifdef ENABLE_PERF_REPORT
+    if (perf_report_out) {
+        perf_report_out << display.get_perf_report();
+    }
+#endif
+
     return 0;
 }
