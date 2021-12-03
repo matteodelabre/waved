@@ -564,7 +564,7 @@ auto read_metadata() -> std::vector<std::string>
     return result;
 }
 
-auto barcode_symbol_to_int(char symbol) -> std::uint16_t
+auto barcode_symbol_to_int(char symbol) -> std::int16_t
 {
     if ('0' <= symbol && symbol <= '9') {
         // 0 - 9 get mapped to 0 - 9
@@ -585,7 +585,7 @@ auto barcode_symbol_to_int(char symbol) -> std::uint16_t
     }
 }
 
-auto decode_fpl_number(const std::string& barcode) -> std::uint16_t
+auto decode_fpl_number(const std::string& barcode) -> std::int16_t
 {
     if (barcode.size() < 8) {
         return -1;

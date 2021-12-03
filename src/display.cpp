@@ -372,7 +372,10 @@ bool Display::push_update(
         , region
         , std::move(trans_buffer)
 #ifdef ENABLE_PERF_REPORT
-        , /* queue_time = */ chrono::steady_clock::now(),
+        , /* queue_time = */ chrono::steady_clock::now()
+        , /* dequeue_time = */ chrono::steady_clock::now()
+        , /* generate_times = */ {}
+        , /* vsync_times = */ {}
 #endif // ENABLE_PERF_REPORT
     });
 
@@ -416,8 +419,8 @@ void Display::align_update()
     auto& update = this->generate_update;
 
     if (
-        update.region.width & mask == 0
-        && update.region.left & mask == 0
+        (update.region.width & mask) == 0
+        && (update.region.left & mask) == 0
     ) {
         return;
     }
@@ -534,8 +537,8 @@ void Display::generate_frames()
         const Intensity* next = next_base;
 
         std::size_t i = 0;
-        std::uint8_t byte1;
-        std::uint8_t byte2;
+        std::uint8_t byte1 = 0;
+        std::uint8_t byte2 = 0;
 
         for (std::size_t y = 0; y < region.height; ++y) {
             for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {

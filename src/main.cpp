@@ -223,6 +223,10 @@ void do_image(Display& display)
         }
     }
 
+    if (maxval == 0 || width == 0 || height == 0) {
+        return;
+    }
+
     // Create buffer from image data
     std::vector<Intensity> buffer(1404 * 1872, 0);
 
@@ -234,7 +238,13 @@ void do_image(Display& display)
         }
 
         // Ignore overflowing pixels
-        for (std::size_t x = 0; x < std::max(0, 1404 - width); ++x) {
+        auto rem = 1404u - width;
+
+        if (rem > 1404u) {
+            rem = 0;
+        }
+
+        for (std::size_t x = 0; x < rem; ++x) {
             std::getline(image, line);
         }
     }
@@ -282,7 +292,6 @@ int main(int argc, const char** argv)
 {
     using namespace std::literals::chrono_literals;
     const char* name = argv[0];
-    bool from_file = false;
     next_arg(argc, argv);
 
     if (argc && (argv[0] == std::string("-h") || argv[0] == std::string("--help"))) {
