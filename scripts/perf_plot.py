@@ -16,7 +16,7 @@ import sys
 import argparse
 
 
-TIME_MARGIN = 100_000
+TIME_MARGIN = 500_000
 TIME_UNIT_WIDTH = 0.000_1
 TIME_TICK_SPACE = 1_000_000
 UPDATE_ROW_HEIGHT = 10
@@ -112,11 +112,15 @@ y1="0" y2="{len(updates) * UPDATE_ROW_HEIGHT}" class="time-tick" />""", file=out
         # Update ID labels on both ends
         print(f"""<text x="{time_to_x(update["start"]) -
 UPDATE_LABEL_SPACING}" y="{(y + 0.55) * UPDATE_ROW_HEIGHT}" \
-class="update-label">{update["id"]}</text>""", file=out)
+class="update-label">\
+#{update["id"]} \
+(mode {update["mode"]})\
+</text>""", file=out)
         print(f"""<text x="{time_to_x(update["end"]) +
 UPDATE_LABEL_SPACING}" y="{(y + 0.55) * UPDATE_ROW_HEIGHT}" \
 class="update-label update-label-end">\
-{round((update["end"] - update["start"]) / 1_000)} ms</text>""", file=out)
+{round((update["dequeue_time"] - update["start"]) / 1_000)} ms + \
+{round((update["end"] - update["dequeue_time"]) / 1_000)} ms</text>""", file=out)
 
         # Add rectangle for the preparation time
         print(f"""<rect x="{time_to_x(update["dequeue_time"])}" \
@@ -124,7 +128,7 @@ y="{y * UPDATE_ROW_HEIGHT}" \
 width="{delta_to_x(update["dequeue_time"], update["generate_times"][0])}" \
 height="{UPDATE_ROW_HEIGHT}" \
 class="update-prepare"><title>\
-Update #{update["id"]} - Prepare - \
+Update #{update["id"]} — Prepare — \
 {round((update["generate_times"][0] - update["dequeue_time"]) / 1_000)} ms\
 </title></rect>""", file=out)
 
@@ -138,7 +142,7 @@ y="{y * UPDATE_ROW_HEIGHT}" \
 width="{delta_to_x(start, end)}" \
 height="{UPDATE_ROW_HEIGHT}" \
 class="update-generate-{"even" if x % 2 == 0 else "odd"}"><title>\
-Update #{update["id"]} - Generate frame #{x} - \
+Update #{update["id"]} — Generate frame #{x} — \
 {round((end - start) / 1_000)} ms\
 </title></rect>""", file=out)
 
@@ -152,7 +156,7 @@ y="{y * UPDATE_ROW_HEIGHT}" \
 width="{delta_to_x(start, end)}" \
 height="{UPDATE_ROW_HEIGHT}" \
 class="update-vsync-{"even" if x % 2 == 0 else "odd"}"><title>\
-Update #{update["id"]} - Vsync frame #{x} - \
+Update #{update["id"]} — Vsync frame #{x} — \
 {round((end - start) / 1_000)} ms\
 </title></rect>""", file=out)
 
@@ -163,7 +167,7 @@ y="{(y + 0.35) * UPDATE_ROW_HEIGHT}" width="{0.3 * UPDATE_ROW_HEIGHT}" \
 height="{0.3 * UPDATE_ROW_HEIGHT}" class="update-queue" \
 transform="rotate(45 {time_to_x(update["queue_time"])} \
 {(y + 0.5) * UPDATE_ROW_HEIGHT})"><title>\
-Update #{update["id"]} - Queue time\
+Update #{update["id"]} — Queue time\
 </title></rect>""", file=out)
 
     print("</svg>", file=out)
