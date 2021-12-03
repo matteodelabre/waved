@@ -505,9 +505,6 @@ void Display::generate_frames()
 {
     std::vector<bool> is_consecutive = this->check_consecutive();
     auto& update = this->generate_update;
-#if ENABLE_PERF_REPORT
-    update.generate_start_time = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
 
     const auto& region = update.region;
     const Intensity* prev_base = this->current_intensity.data()
@@ -518,14 +515,15 @@ void Display::generate_frames()
         update.mode, this->temperature
     );
 
+#if ENABLE_PERF_REPORT
+    update.generate_times.resize(waveform.size() + 1);
+    update.generate_times[0] = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
+
     this->generate_buffer.clear();
     this->generate_buffer.reserve(waveform.size());
 
     for (std::size_t k = 0; k < waveform.size(); ++k) {
-#ifdef ENABLE_PERF_REPORT
-        const auto start_time = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
-
         this->generate_buffer.emplace_back(this->null_frame);
         std::uint8_t* data = this->generate_buffer.back().data()
             + (margin_top + region.top) * buf_stride
@@ -580,13 +578,9 @@ void Display::generate_frames()
         }
 
 #ifdef ENABLE_PERF_REPORT
-        const auto end_time = chrono::steady_clock::now();
+        update.generate_times[k + 1] = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT
     }
-
-#ifdef ENABLE_PERF_REPORT
-    update.generate_end_time = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
 
     {
         std::unique_lock<std::mutex> lock(this->vsync_write_lock);
@@ -644,7 +638,8 @@ void Display::run_vsync_thread()
 
         Update& update = this->vsync_update;
 #if ENABLE_PERF_REPORT
-        update.vsync_start_time = chrono::steady_clock::now();
+        update.vsync_times.resize(this->vsync_buffer.size() + 1);
+        update.vsync_times[0] = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT
 
         this->set_power(true);
@@ -679,10 +674,13 @@ void Display::run_vsync_thread()
             }
 
             first_frame = false;
+
+#ifdef ENABLE_PERF_REPORT
+            update.vsync_times[k + 1] = chrono::steady_clock::now();
+#endif // ENABLE_PERF_REPORT
         }
 
 #ifdef ENABLE_PERF_REPORT
-        update.vsync_end_time = chrono::steady_clock::now();
         this->make_perf_record();
 #endif // ENABLE_PERF_REPORT
 
@@ -702,33 +700,47 @@ void Display::reset_frame(std::size_t frame_index)
 }
 
 #ifdef ENABLE_PERF_REPORT
-inline std::uint64_t epoch_time(chrono::steady_clock::time_point t)
+std::ostream& print_time(std::ostream& out, chrono::steady_clock::time_point t)
 {
-    return chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
+    out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
         .count();
+    return out;
+}
+
+std::ostream& print_time_list(
+    std::ostream& out,
+    const std::vector<chrono::steady_clock::time_point>& ts
+)
+{
+    for (auto it = ts.cbegin(); it != ts.cend(); ++it) {
+        print_time(out, *it);
+
+        if (std::next(it) != ts.cend()) {
+            out << ':';
+        }
+    }
+
+    return out;
 }
 
 void Display::make_perf_record()
 {
     const auto& update = this->vsync_update;
-    this->perf_report << update.id << ','
-        << static_cast<int>(update.mode) << ','
-        << update.region.width << ','
-        << update.region.height << ','
-        << epoch_time(update.queue_time) << ','
-        << epoch_time(update.dequeue_time) << ','
-        << epoch_time(update.generate_start_time) << ','
-        << epoch_time(update.generate_end_time) << ','
-        << epoch_time(update.vsync_start_time) << ','
-        << epoch_time(update.vsync_end_time) << '\n';
+    this->perf_report << update.id << ',';
+    this->perf_report << static_cast<int>(update.mode) << ',';
+    this->perf_report << update.region.width << ',';
+    this->perf_report << update.region.height << ',';
+    print_time(this->perf_report, update.queue_time) << ',';
+    print_time(this->perf_report, update.dequeue_time) << ',';
+    print_time_list(this->perf_report, update.generate_times) << ',';
+    print_time_list(this->perf_report, update.vsync_times) << '\n';
 }
 
 std::string Display::get_perf_report() const
 {
     return (
         "id,mode,width,height,queue_time,dequeue_time,"
-        "generate_start_time,generate_end_time,"
-        "vsync_start_time,vsync_end_time\n"
+        "generate_times,vsync_times\n"
         + this->perf_report.str()
     );
 }

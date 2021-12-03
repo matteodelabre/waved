@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <cstdint>
+#include <vector>
 #include <linux/fb.h>
 
 /**
@@ -238,17 +239,11 @@ private:
         // Time of removal from the update queue
         std::chrono::steady_clock::time_point dequeue_time;
 
-        // Start time of frame generation
-        std::chrono::steady_clock::time_point generate_start_time;
+        // Frame generation start time and individual frame end times
+        std::vector<std::chrono::steady_clock::time_point> generate_times;
 
-        // End time of frame generation
-        std::chrono::steady_clock::time_point generate_end_time;
-
-        // Start time of frame vsync
-        std::chrono::steady_clock::time_point vsync_start_time;
-
-        // End time of frame vsync
-        std::chrono::steady_clock::time_point vsync_end_time;
+        // Vsync start time and individual frame end times
+        std::vector<std::chrono::steady_clock::time_point> vsync_times;
 #endif // ENABLE_PERF_REPORT
     };
 
