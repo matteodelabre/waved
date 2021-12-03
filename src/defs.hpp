@@ -14,7 +14,7 @@
 /**
  * Phase types.
  *
- * A phase is a command sent to an individual EPD cell for 1/85 s.
+ * A phase is a command sent to an individual EPD cell in one frame.
  */
 enum class Phase : std::uint8_t
 {
@@ -48,8 +48,8 @@ using PhaseMatrix
 /**
  * Waveform.
  *
- * A waveform is a sequence of phases used to transition an EPD cell from a
- * given grayscale intensity to another.
+ * A waveform is a sequence of phase matrices used to transition an EPD cell
+ * from a given grayscale intensity to another.
  */
 using Waveform = std::vector<PhaseMatrix>;
 

@@ -1,5 +1,5 @@
 /**
- * @file
+ * @file Dump waveform information from a WBF file.
  * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

@@ -274,7 +274,7 @@ void print_help(std::ostream& out, const char* name)
 #else
     out << "Usage: " << name << " [-h|--help]\n";
 #endif
-    out << "Run tests of the EPDC driver.\n";
+    out << "Run waved tests.\n";
 #ifdef ENABLE_PERF_REPORT
     out << "Dump performance report in PERF_OUT (in CSV format).\n";
 #else

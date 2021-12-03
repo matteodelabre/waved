@@ -36,7 +36,7 @@ class Display
 {
 public:
     /**
-     * Open a display with given device paths.
+     * Open a display with the given device information.
      *
      * @param framebuffer_path Path to the framebuffer device.
      * @param temperature_sensor_path Path to the temperature sensor file.
@@ -48,7 +48,7 @@ public:
         WaveformTable waveform_table
     );
 
-    /** Discover the path to framebuffer device. */
+    /** Discover the path to the framebuffer device. */
     static std::optional<std::string> discover_framebuffer();
 
     /** Discover the path to the temperature sensor file. */
@@ -63,7 +63,8 @@ public:
      * added to the queue using `push_update()` continuously from a background
      * thread. If no updates are received for `power_off_timeout` ticks, the
      * controller is switched off to save power. Calling `stop()` or destroying
-     * this object will stop the background threads.
+     * this object will stop the background threads and updates remaining
+     * in the queue will not be processed.
      */
     void start();
 
@@ -76,8 +77,6 @@ public:
      * @param mode Update mode to use.
      * @param region Coordinates of the region affected by the update.
      * @param buffer New values for the pixels in the updated region.
-     * @param waveform Waveform to use for updating pixels. The waveform object
-     * must live until this update is processed, which can take some time.
      * @return True if the update was pushed, false if it was deemed invalid.
      */
     bool push_update(
@@ -87,12 +86,24 @@ public:
     );
 
 #ifdef ENABLE_PERF_REPORT
-    /** Get the performance report as a CSV string. */
+    /**
+     * Get the performance report for past updates as a CSV string.
+     *
+     * The CSV document will contain one row per processed update, with
+     * the following information:
+     *
+     * id - Unique ID of the update
+     * mode - Update mode used
+     * width -  Width of the update rectangle
+     * height - Height of the update rectangle
+     * queue_time - Timestamp when the update was queued
+     * dequeue_time - Timestamp when the update started being processed
+     * generate_times - List of timestamps when each frame generation
+     *     was finished
+     * vsync_times - List of timestamps when each frame vsync was finished
+     */
     std::string get_perf_report() const;
 #endif
-
-    /** Unique identifier for an update being processed. */
-    using UpdateID = std::uint32_t;
 
 private:
     // Display-specific waveform information
@@ -215,6 +226,9 @@ private:
 
     // Buffer holding the current known intensity state of all display cells
     std::array<Intensity, epd_size> current_intensity{};
+
+    /** Unique identifier for an update being processed. */
+    using UpdateID = std::uint32_t;
 
     static UpdateID next_update_id;
 
