@@ -89,10 +89,10 @@ public:
     /**
      * Get the performance report for past updates as a CSV string.
      *
-     * The CSV document will contain one row per processed update, with
-     * the following information:
+     * The CSV document will contain one row per processed update (or batch of
+     * updates merged together), with the following information:
      *
-     * id - Unique ID of the update
+     * ids - Unique IDs of updates in this batch
      * mode - Update mode used
      * width -  Width of the update rectangle
      * height - Height of the update rectangle
@@ -101,6 +101,9 @@ public:
      * generate_times - List of timestamps when each frame generation
      *     was finished
      * vsync_times - List of timestamps when each frame vsync was finished
+     *
+     * Fields that contain a variable number of values (ids, generate_times,
+     * and vsync_times) are colon-separated.
      */
     std::string get_perf_report() const;
 #endif
@@ -227,7 +230,7 @@ private:
     // Buffer holding the current known intensity state of all display cells
     std::array<Intensity, epd_size> current_intensity{};
 
-    /** Unique identifier for an update being processed. */
+    /** Identifier for an update being processed. */
     using UpdateID = std::uint32_t;
 
     static UpdateID next_update_id;
@@ -235,7 +238,9 @@ private:
     /** Information about a display update being processed. */
     struct Update
     {
-        UpdateID id;
+        // List of IDs for this update. Usually contains just a single ID,
+        // but can contain more if several updates are merged together
+        std::vector<UpdateID> id;
 
         // Update mode
         Mode mode;
@@ -310,7 +315,19 @@ private:
      */
     bool pop_update();
 
-    /** Align update on a 8-pixel boundary on the X axis. */
+    /**
+     * Try to merge the next update from the queue into the current update.
+     *
+     * Two updates can be merged if they bear the same update mode.
+     * This assumes that a lock on updates_lock is already held by
+     * the current thread.
+     *
+     * @return True if an update was merged into the current update,
+     * false otherwise.
+     */
+    bool merge_update();
+
+    /** Align the current update on a 8-pixel boundary on the X axis. */
     void align_update();
 
     /** Scan update to find pixel transitions equal to their predecessor. */

@@ -127,6 +127,7 @@ void do_random(Display& display)
 
 void do_spiral(Display& display)
 {
+    using namespace std::literals::chrono_literals;
     int count = 500;
     double resol = 20.;
     double resol_scaling = 0.09;
@@ -153,6 +154,7 @@ void do_spiral(Display& display)
             },
             buffer
         );
+        std::this_thread::sleep_for(30ms);
     }
 }
 
@@ -373,8 +375,9 @@ int main(int argc, const char** argv)
 
     std::cerr << "[test] Spiral\n";
     do_init(display);
+    std::this_thread::sleep_for(4s);
     do_spiral(display);
-    std::this_thread::sleep_for(70s);
+    std::this_thread::sleep_for(5s);
 
     std::cerr << "[test] End\n";
     do_init(display);

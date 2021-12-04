@@ -367,7 +367,7 @@ bool Display::push_update(
 
     std::lock_guard<std::mutex> lock(this->updates_lock);
     this->pending_updates.emplace(Update{
-        this->next_update_id++
+        {this->next_update_id++}
         , mode
         , region
         , std::move(trans_buffer)
@@ -407,9 +407,110 @@ bool Display::pop_update()
 
     this->generate_update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
+
+    while (this->merge_update());
+
 #ifdef ENABLE_PERF_REPORT
     this->generate_update.dequeue_time = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT
+    return true;
+}
+
+static void copy_rect(
+    const Intensity* source,
+    const Region& source_region,
+    std::uint32_t source_width,
+    Intensity* dest,
+    std::uint32_t dest_top,
+    std::uint32_t dest_left,
+    std::uint32_t dest_width
+)
+{
+    source += source_region.left + source_width * source_region.top;
+    dest += dest_left + dest_width * dest_top;
+
+    for (std::uint32_t y = 0; y < source_region.height; ++y) {
+        std::copy(source, source + source_region.width, dest);
+        source += source_width;
+        dest += dest_width;
+    }
+}
+
+auto Display::merge_update() -> bool
+{
+    if (this->pending_updates.empty()) {
+        return false;
+    }
+
+    Update& cur_update = this->generate_update;
+    const Update& next_update = this->pending_updates.front();
+
+    if (cur_update.mode != next_update.mode) {
+        return false;
+    }
+
+    std::copy(
+        next_update.id.cbegin(), next_update.id.cend(),
+        std::back_inserter(cur_update.id)
+    );
+
+    auto top = std::min(cur_update.region.top, next_update.region.top);
+    auto left = std::min(cur_update.region.left, next_update.region.left);
+    auto width = std::max(
+        cur_update.region.left + cur_update.region.width,
+        next_update.region.left + next_update.region.width
+    ) - left;
+    auto height = std::max(
+        cur_update.region.top + cur_update.region.height,
+        next_update.region.top + next_update.region.height
+    ) - top;
+
+    Region merged_region{top, left, width, height};
+
+    // Create merged buffer with overlayed current intensities,
+    // current update and merged update
+    std::vector<Intensity> merged_buffer(width * height);
+
+    copy_rect(
+        /* source = */ this->current_intensity.data(),
+        /* source_region = */ merged_region,
+        /* source_width = */ epd_width,
+        /* dest = */ merged_buffer.data(),
+        /* dest_top = */ 0,
+        /* dest_left = */ 0,
+        /* dest_width = */ width
+    );
+
+    copy_rect(
+        /* source = */ cur_update.buffer.data(),
+        /* source_region = */ Region{
+            0, 0,
+            cur_update.region.width, cur_update.region.height
+        },
+        /* source_width = */ cur_update.region.width,
+        /* dest = */ merged_buffer.data(),
+        /* dest_top = */ cur_update.region.top - merged_region.top,
+        /* dest_left = */ cur_update.region.left - merged_region.left,
+        /* dest_width = */ merged_region.width
+    );
+
+    copy_rect(
+        /* source = */ next_update.buffer.data(),
+        /* source_region = */ Region{
+            0, 0,
+            next_update.region.width, next_update.region.height
+        },
+        /* source_width = */ next_update.region.width,
+        /* dest = */ merged_buffer.data(),
+        /* dest_top = */ next_update.region.top - merged_region.top,
+        /* dest_left = */ next_update.region.left - merged_region.left,
+        /* dest_width = */ merged_region.width
+    );
+
+    cur_update.region = std::move(merged_region);
+    cur_update.buffer = std::move(merged_buffer);
+
+    this->pending_updates.pop();
     return true;
 }
 
@@ -703,20 +804,18 @@ void Display::reset_frame(std::size_t frame_index)
 }
 
 #ifdef ENABLE_PERF_REPORT
-std::ostream& print_time(std::ostream& out, chrono::steady_clock::time_point t)
+std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
 {
     out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
         .count();
     return out;
 }
 
-std::ostream& print_time_list(
-    std::ostream& out,
-    const std::vector<chrono::steady_clock::time_point>& ts
-)
+template<typename Elem>
+std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
 {
     for (auto it = ts.cbegin(); it != ts.cend(); ++it) {
-        print_time(out, *it);
+        out << *it;
 
         if (std::next(it) != ts.cend()) {
             out << ':';
@@ -729,14 +828,14 @@ std::ostream& print_time_list(
 void Display::make_perf_record()
 {
     const auto& update = this->vsync_update;
-    this->perf_report << update.id << ',';
-    this->perf_report << static_cast<int>(update.mode) << ',';
-    this->perf_report << update.region.width << ',';
-    this->perf_report << update.region.height << ',';
-    print_time(this->perf_report, update.queue_time) << ',';
-    print_time(this->perf_report, update.dequeue_time) << ',';
-    print_time_list(this->perf_report, update.generate_times) << ',';
-    print_time_list(this->perf_report, update.vsync_times) << '\n';
+    this->perf_report << update.id << ','
+        << static_cast<int>(update.mode) << ','
+        << update.region.width << ','
+        << update.region.height << ','
+        << update.queue_time << ','
+        << update.dequeue_time << ','
+        << update.generate_times << ','
+        << update.vsync_times << '\n';
 }
 
 std::string Display::get_perf_report() const
