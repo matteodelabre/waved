@@ -6,20 +6,8 @@ project(waved VERSION 0.1.0)
 
 find_package(Threads REQUIRED)
 
-add_executable(waved
-    src/display.cpp
-    src/file_descriptor.cpp
-    src/main.cpp
-    src/waveform_table.cpp
-)
-
-add_executable(waved-dump-wbf
-    src/dump_wbf.cpp
-    src/waveform_table.cpp
-)
-
 # Option to enable perf reporting
-option(ENABLE_PERF_REPORT "Report performance information" ON)
+option(ENABLE_PERF_REPORT "Report performance information" OFF)
 
 if(ENABLE_PERF_REPORT)
     add_compile_definitions(ENABLE_PERF_REPORT)
@@ -33,7 +21,7 @@ if(CMAKE_VERSION VERSION_LESS "3.8")
         message(FATAL_ERROR "Unknown compiler")
     endif()
 else()
-    set_property(TARGET waved waved-dump-wbf PROPERTY CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD 17)
 endif()
 
 # Disable optimizations in debug mode
@@ -42,5 +30,22 @@ if(CMAKE_COMPILER_IS_GNUCC)
     set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
 endif(CMAKE_COMPILER_IS_GNUCC)
 
+# Main library
+add_library(waved SHARED
+    lib/display.cpp
+    lib/file_descriptor.cpp
+    lib/waveform_table.cpp
+)
+set_target_properties(waved PROPERTIES
+    VERSION ${CMAKE_PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
 target_link_libraries(waved Threads::Threads)
-target_include_directories(waved PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+target_include_directories(waved PUBLIC lib)
+
+# Demo program
+add_executable(waved-demo src/demo/main.cpp)
+target_link_libraries(waved-demo waved)
+
+# WBF dump program
+add_executable(waved-dump src/dump/main.cpp)
+target_link_libraries(waved-dump waved)

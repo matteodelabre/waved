@@ -7,6 +7,9 @@
 #ifndef WAVED_CHECKSUM_TPP
 #define WAVED_CHECKSUM_TPP
 
+namespace Waved
+{
+
 /** Lookup table for computing standard CRC32 checksums. */
 constexpr std::uint32_t crc32_table[] = {
     0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
@@ -81,5 +84,7 @@ std::uint32_t crc32_checksum(
 
     return c ^ 0xFFFFFFFF;
 }
+
+} // namespace Waved
 
 #endif // WAVED_CHECKSUM_HPP

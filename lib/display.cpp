@@ -23,6 +23,58 @@
 namespace fs = std::filesystem;
 namespace chrono = std::chrono;
 
+namespace
+{
+
+constexpr int fbioblank_off = FB_BLANK_POWERDOWN;
+constexpr int fbioblank_on = FB_BLANK_UNBLANK;
+
+void copy_rect(
+    const Waved::Intensity* source,
+    const Waved::Region& source_region,
+    std::uint32_t source_width,
+    Waved::Intensity* dest,
+    std::uint32_t dest_top,
+    std::uint32_t dest_left,
+    std::uint32_t dest_width
+)
+{
+    source += source_region.left + source_width * source_region.top;
+    dest += dest_left + dest_width * dest_top;
+
+    for (std::uint32_t y = 0; y < source_region.height; ++y) {
+        std::copy(source, source + source_region.width, dest);
+        source += source_width;
+        dest += dest_width;
+    }
+}
+
+std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
+{
+    out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
+        .count();
+    return out;
+}
+
+template<typename Elem>
+std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
+{
+    for (auto it = ts.cbegin(); it != ts.cend(); ++it) {
+        out << *it;
+
+        if (std::next(it) != ts.cend()) {
+            out << ':';
+        }
+    }
+
+    return out;
+}
+
+}
+
+namespace Waved
+{
+
 Display::UpdateID Display::next_update_id = 0;
 
 Display::Display(
@@ -271,9 +323,6 @@ void Display::stop()
     this->set_power(false);
 }
 
-constexpr int fbioblank_off = FB_BLANK_POWERDOWN;
-constexpr int fbioblank_on = FB_BLANK_UNBLANK;
-
 void Display::set_power(bool power_state)
 {
     if (power_state != this->power_state) {
@@ -414,26 +463,6 @@ bool Display::pop_update()
     this->generate_update.dequeue_time = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT
     return true;
-}
-
-static void copy_rect(
-    const Intensity* source,
-    const Region& source_region,
-    std::uint32_t source_width,
-    Intensity* dest,
-    std::uint32_t dest_top,
-    std::uint32_t dest_left,
-    std::uint32_t dest_width
-)
-{
-    source += source_region.left + source_width * source_region.top;
-    dest += dest_left + dest_width * dest_top;
-
-    for (std::uint32_t y = 0; y < source_region.height; ++y) {
-        std::copy(source, source + source_region.width, dest);
-        source += source_width;
-        dest += dest_width;
-    }
 }
 
 auto Display::merge_update() -> bool
@@ -804,27 +833,6 @@ void Display::reset_frame(std::size_t frame_index)
 }
 
 #ifdef ENABLE_PERF_REPORT
-std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
-{
-    out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
-        .count();
-    return out;
-}
-
-template<typename Elem>
-std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
-{
-    for (auto it = ts.cbegin(); it != ts.cend(); ++it) {
-        out << *it;
-
-        if (std::next(it) != ts.cend()) {
-            out << ':';
-        }
-    }
-
-    return out;
-}
-
 void Display::make_perf_record()
 {
     const auto& update = this->vsync_update;
@@ -847,3 +855,5 @@ std::string Display::get_perf_report() const
     );
 }
 #endif // ENABLE_PERF_REPORT
+
+} // namespace Waved

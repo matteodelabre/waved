@@ -16,36 +16,36 @@
 #include <chrono>
 #include <random>
 
-void do_init(Display& display)
+void do_init(Waved::Display& display)
 {
     display.push_update(
         /* mode = */ 0,
-        Region{
+        Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
-        std::vector<Intensity>(1404 * 1872, 30)
+        std::vector<Waved::Intensity>(1404 * 1872, 30)
     );
 }
 
-void do_block_gradients(Display& display)
+void do_block_gradients(Waved::Display& display)
 {
     constexpr std::size_t block_size = 100;
     constexpr std::size_t block_count = 16;
-    std::vector<Intensity> buffer(block_size * block_size * block_count);
+    std::vector<Waved::Intensity> buffer(block_size * block_size * block_count);
 
     for (std::size_t i = 0; i < block_count; ++i) {
         std::fill(
             buffer.begin() + block_size * block_size * i,
             buffer.begin() + block_size * block_size * (i + 1),
-            static_cast<Intensity>(i * 2)
+            static_cast<Waved::Intensity>(i * 2)
         );
     }
 
-    for (Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
-            Region{
+            Waved::Region{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
@@ -56,27 +56,27 @@ void do_block_gradients(Display& display)
     }
 }
 
-void do_continuous_gradients(Display& display)
+void do_continuous_gradients(Waved::Display& display)
 {
     constexpr std::size_t block_size = 100;
     constexpr std::size_t block_count = 16;
     constexpr std::size_t resol = 5;
-    std::vector<Intensity> buffer(block_size * block_size * block_count);
+    std::vector<Waved::Intensity> buffer(block_size * block_size * block_count);
 
     for (std::size_t i = 0; i < block_size * block_count; ++i) {
         std::fill(
             buffer.begin() + block_size * i,
             buffer.begin() + block_size * (i + 1),
             (i / 16 / resol) % 2 == 0
-                ? static_cast<Intensity>(((i / resol) % 16) * 2)
-                : static_cast<Intensity>(30 - ((i / resol) % 16) * 2)
+                ? static_cast<Waved::Intensity>(((i / resol) % 16) * 2)
+                : static_cast<Waved::Intensity>(30 - ((i / resol) % 16) * 2)
         );
     }
 
-    for (Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
-            Region{
+            Waved::Region{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
@@ -87,9 +87,9 @@ void do_continuous_gradients(Display& display)
     }
 }
 
-void do_all_diff(Display& display)
+void do_all_diff(Waved::Display& display)
 {
-    std::vector<Intensity> buffer(1404 * 1872);
+    std::vector<Waved::Intensity> buffer(1404 * 1872);
 
     for (std::size_t i = 0; i < buffer.size(); ++i) {
         buffer[i] = (i % 16) * 2;
@@ -97,7 +97,7 @@ void do_all_diff(Display& display)
 
     display.push_update(
         /* mode = */ 2,
-        Region{
+        Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
@@ -105,9 +105,9 @@ void do_all_diff(Display& display)
     );
 }
 
-void do_random(Display& display)
+void do_random(Waved::Display& display)
 {
-    std::vector<Intensity> buffer(1404 * 1872);
+    std::vector<Waved::Intensity> buffer(1404 * 1872);
     std::mt19937 generator(424242);
     std::uniform_int_distribution<std::mt19937::result_type> distrib(0, 15);
 
@@ -117,7 +117,7 @@ void do_random(Display& display)
 
     display.push_update(
         /* mode = */ 2,
-        Region{
+        Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
@@ -125,7 +125,7 @@ void do_random(Display& display)
     );
 }
 
-void do_spiral(Display& display)
+void do_spiral(Waved::Display& display)
 {
     using namespace std::literals::chrono_literals;
     int count = 500;
@@ -137,7 +137,7 @@ void do_spiral(Display& display)
     std::uint32_t width = 1404;
     std::uint32_t height = 1872;
 
-    std::vector<Intensity> buffer(stencil * stencil, 0);
+    std::vector<Waved::Intensity> buffer(stencil * stencil, 0);
 
     for (int i = 0; i < count; ++i) {
         auto t = i / (resol + i * resol_scaling);
@@ -148,7 +148,7 @@ void do_spiral(Display& display)
 
         display.push_update(
             /* mode = */ 6,
-            Region{
+            Waved::Region{
                 /* top = */ y, /* left = */ x,
                 /* width = */ stencil, /* height = */ stencil
             },
@@ -158,7 +158,7 @@ void do_spiral(Display& display)
     }
 }
 
-void do_image(Display& display)
+void do_image(Waved::Display& display)
 {
     std::ifstream image{"./image.pgm"};
 
@@ -230,7 +230,7 @@ void do_image(Display& display)
     }
 
     // Create buffer from image data
-    std::vector<Intensity> buffer(1404 * 1872, 0);
+    std::vector<Waved::Intensity> buffer(1404 * 1872, 0);
 
     for (std::size_t y = 0; y < 1872; ++y) {
         for (std::size_t x = 0; x < 1404; ++x) {
@@ -251,10 +251,10 @@ void do_image(Display& display)
         }
     }
 
-    for (Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::Mode mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
-            Region{
+            Waved::Region{
                 /* top = */ 0, /* left = */ 0,
                 /* width = */ 1404, /* height = */ 1872
             },
@@ -310,7 +310,7 @@ int main(int argc, const char** argv)
     }
 #endif
 
-    auto wbf_path = WaveformTable::discover_wbf_file();
+    auto wbf_path = Waved::WaveformTable::discover_wbf_file();
 
     if (!wbf_path) {
         std::cerr << "[init] Cannot find waveform file\n";
@@ -319,8 +319,8 @@ int main(int argc, const char** argv)
         std::cerr << "[init] Using waveform file: " << *wbf_path << '\n';
     }
 
-    auto table = WaveformTable::from_wbf(wbf_path->data());
-    auto framebuffer_path = Display::discover_framebuffer();
+    auto table = Waved::WaveformTable::from_wbf(wbf_path->data());
+    auto framebuffer_path = Waved::Display::discover_framebuffer();
 
     if (!framebuffer_path) {
         std::cerr << "[init] Cannot find framebuffer device\n";
@@ -330,7 +330,7 @@ int main(int argc, const char** argv)
             << *framebuffer_path << '\n';
     }
 
-    auto sensor_path = Display::discover_temperature_sensor();
+    auto sensor_path = Waved::Display::discover_temperature_sensor();
 
     if (!sensor_path) {
         std::cerr << "[init] Cannot find temperature sensor\n";
@@ -340,7 +340,7 @@ int main(int argc, const char** argv)
             << *sensor_path << '\n';
     }
 
-    Display display{
+    Waved::Display display{
         framebuffer_path->data(),
         sensor_path->data(),
         std::move(table),

@@ -44,15 +44,15 @@ int main(int argc, const char** argv)
         return 0;
     }
 
-    WaveformTable table;
+    Waved::WaveformTable table;
 
     try {
         if (argc && !is_index(argv[0])) {
             from_file = true;
-            table = WaveformTable::from_wbf(argv[0]);
+            table = Waved::WaveformTable::from_wbf(argv[0]);
             next_arg(argc, argv);
         } else {
-            table = WaveformTable::from_wbf(std::cin);
+            table = Waved::WaveformTable::from_wbf(std::cin);
         }
     } catch (const std::system_error& err) {
         std::cerr << "I/O error: " << err.what() << '\n';
@@ -98,8 +98,8 @@ int main(int argc, const char** argv)
         std::cerr << "Listing waveforms for mode " << mode << " and "
             "temperature " << temperature << " °C\n\n";
 
-        for (Intensity from = 0; from < intensity_values; from += 2) {
-            for (Intensity to = 0; to < intensity_values; to += 2) {
+        for (Waved::Intensity from = 0; from < Waved::intensity_values; from += 2) {
+            for (Waved::Intensity to = 0; to < Waved::intensity_values; to += 2) {
                 std::cerr << "(" << std::setw(2) << static_cast<int>(from)
                     << " -> " << std::setw(2) << static_cast<int>(to) << "): ";
 

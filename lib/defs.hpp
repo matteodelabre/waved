@@ -11,6 +11,9 @@
 #include <cstdint>
 #include <vector>
 
+namespace Waved
+{
+
 /**
  * Phase types.
  *
@@ -61,5 +64,7 @@ struct Region
     std::uint32_t width;
     std::uint32_t height;
 };
+
+} // namespace Waved
 
 #endif // WAVED_DEFS_HPP

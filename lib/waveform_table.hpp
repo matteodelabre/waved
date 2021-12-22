@@ -15,6 +15,9 @@
 #include <vector>
 #include <optional>
 
+namespace Waved
+{
+
 /**
  * Waveform mode.
  *
@@ -95,8 +98,9 @@ private:
     // combinations reuse the same waveform
     std::vector<Waveform> waveforms;
 
-    // Vector for looking the waveform corresponding to a mode and temperature
+    // Vector for retrieving the waveform for any given mode and temperature
     Lookup waveform_lookup;
-};
+}; // class WaveformTable
 
+} // namespace Waved
 #endif // WAVED_WAVEFORM_TABLE_HPP

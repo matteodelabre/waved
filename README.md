@@ -21,7 +21,7 @@ cmake \
 cmake --build /host/build --verbose
 ```
 
-Resulting binaries are `build/waved` (to launch the demo) and `build/waved-dump-wbf` (to print information about a WBF file).
+After the build completes, resulting binaries can be found inside the `build` directory. Those include the `libwaved` shared library, the `waved-demo` binary used to run visual tests, and the `waved-dump` binary that can be used to print information about a WBF file.
 
 ### Roadmap
 

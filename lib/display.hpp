@@ -24,6 +24,9 @@
 #include <vector>
 #include <linux/fb.h>
 
+namespace Waved
+{
+
 /**
  * Interface for the display controller.
  *
@@ -350,6 +353,8 @@ private:
     /** Add perf report record for finished update. */
     void make_perf_record();
 #endif // ENABLE_PERF_REPORT
-};
+}; // class Display
+
+} // namespace Waved
 
 #endif // WAVED_DISPLAY_HPP

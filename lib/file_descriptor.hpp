@@ -7,6 +7,9 @@
 #ifndef WAVED_FILE_DESCRIPTOR_HPP
 #define WAVED_FILE_DESCRIPTOR_HPP
 
+namespace Waved
+{
+
 /** Wrapper around C file descriptors. */
 class FileDescriptor
 {
@@ -40,5 +43,7 @@ public:
 private:
     int fd;
 }; // class FileDescriptor
+
+} // namespace Waved
 
 #endif // WAVED_FILE_DESCRIPTOR_HPP

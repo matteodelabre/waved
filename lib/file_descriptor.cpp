@@ -12,6 +12,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+namespace Waved
+{
+
 FileDescriptor::FileDescriptor(const char* path, int flags)
 : fd(open(path, flags))
 {
@@ -55,3 +58,5 @@ FileDescriptor::~FileDescriptor()
         this->fd = -1;
     }
 }
+
+} // namespace Waved

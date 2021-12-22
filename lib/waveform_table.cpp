@@ -15,6 +15,9 @@
 
 namespace fs = std::filesystem;
 
+namespace Waved
+{
+
 WaveformTable::WaveformTable()
 {}
 
@@ -79,6 +82,11 @@ auto WaveformTable::get_mode_count() const -> Mode
 {
     return this->mode_count;
 }
+
+} // namespace Waved
+
+namespace
+{
 
 /**
  * WBF file decoding.
@@ -173,7 +181,7 @@ auto parse_header(const Buffer& buffer) -> wbf_header
     header.wmta = le32toh(header.wmta);
 
     // Verify checksums
-    std::uint8_t checksum1_verif = basic_checksum(begin + 8, begin + 31);
+    std::uint8_t checksum1_verif = Waved::basic_checksum(begin + 8, begin + 31);
 
     if (header.checksum1 != checksum1_verif) {
         std::ostringstream message;
@@ -183,7 +191,7 @@ auto parse_header(const Buffer& buffer) -> wbf_header
         throw std::runtime_error(message.str());
     }
 
-    std::uint8_t checksum2_verif = basic_checksum(begin + 32, begin + 47);
+    std::uint8_t checksum2_verif = Waved::basic_checksum(begin + 32, begin + 47);
 
     if (header.checksum2 != checksum2_verif) {
         std::ostringstream message;
@@ -275,9 +283,9 @@ auto parse_header(const Buffer& buffer) -> wbf_header
 /** Parse the set of temperature ranges from a WBF file. */
 auto parse_temperatures(
     const wbf_header& header, Buffer::const_iterator& begin
-) -> std::vector<Temperature>
+) -> std::vector<Waved::Temperature>
 {
-    std::vector<Temperature> result;
+    std::vector<Waved::Temperature> result;
     std::size_t count = header.temp_range_count + 2;
     result.reserve(count);
 
@@ -287,7 +295,7 @@ auto parse_temperatures(
         result.emplace_back(*it);
     }
 
-    std::uint8_t checksum_verif = basic_checksum(begin, it);
+    std::uint8_t checksum_verif = Waved::basic_checksum(begin, it);
     std::uint8_t checksum_expect = *it;
 
     if (checksum_expect != checksum_verif) {
@@ -353,12 +361,12 @@ auto find_waveform_blocks(
 
 /** Parse a waveform block in a WBF file. */
 auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
--> Waveform
+-> Waved::Waveform
 {
     end -= 2;
 
-    PhaseMatrix matrix;
-    Waveform result;
+    Waved::PhaseMatrix matrix;
+    Waved::Waveform result;
 
     std::uint8_t i = 0;
     std::uint8_t j = 0;
@@ -373,10 +381,10 @@ auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
             continue;
         }
 
-        Phase p4 = static_cast<Phase>(byte & 3);
-        Phase p3 = static_cast<Phase>((byte >> 2) & 3);
-        Phase p2 = static_cast<Phase>((byte >> 4) & 3);
-        Phase p1 = static_cast<Phase>(byte >> 6);
+        auto p4 = static_cast<Waved::Phase>(byte & 3);
+        auto p3 = static_cast<Waved::Phase>((byte >> 2) & 3);
+        auto p2 = static_cast<Waved::Phase>((byte >> 4) & 3);
+        auto p1 = static_cast<Waved::Phase>(byte >> 6);
 
         int repeat = 1;
 
@@ -397,12 +405,12 @@ auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
             matrix[j++][i] = p3;
             matrix[j++][i] = p4;
 
-            if (j == intensity_values) {
+            if (j == Waved::intensity_values) {
                 j = 0;
                 ++i;
             }
 
-            if (i == intensity_values) {
+            if (i == Waved::intensity_values) {
                 i = 0;
                 result.push_back(matrix);
             }
@@ -421,9 +429,9 @@ auto parse_waveforms(
     const std::vector<std::uint32_t>& blocks,
     Buffer::const_iterator file_begin,
     Buffer::const_iterator table_begin
-) -> std::pair<std::vector<Waveform>, WaveformTable::Lookup>
+) -> std::pair<std::vector<Waved::Waveform>, Waved::WaveformTable::Lookup>
 {
-    std::vector<Waveform> waveforms;
+    std::vector<Waved::Waveform> waveforms;
 
     for (auto it = blocks.cbegin(); std::next(it) != blocks.cend(); ++it) {
         waveforms.emplace_back(parse_waveform(
@@ -434,7 +442,7 @@ auto parse_waveforms(
 
     std::size_t mode_count = header.mode_count + 1;
     std::size_t temp_count = header.temp_range_count + 1;
-    WaveformTable::Lookup waveform_lookup;
+    Waved::WaveformTable::Lookup waveform_lookup;
     waveform_lookup.reserve(mode_count);
 
     for (std::size_t mode = 0; mode < mode_count; ++mode) {
@@ -455,6 +463,11 @@ auto parse_waveforms(
 
     return {waveforms, waveform_lookup};
 }
+
+} // anonymous namespace
+
+namespace Waved
+{
 
 auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
 {
@@ -525,6 +538,11 @@ auto WaveformTable::from_wbf(const char* path) -> WaveformTable
 
     return WaveformTable::from_wbf(file);
 }
+
+} // namespace Waved
+
+namespace
+{
 
 /**
  * Barcode decoding.
@@ -607,6 +625,11 @@ auto decode_fpl_number(const std::string& barcode) -> std::int16_t
     return d7 + 320 + (d6 - 10) * 23;
 }
 
+} // anonymous namespace
+
+namespace Waved
+{
+
 auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
 {
     auto metadata = read_metadata();
@@ -644,3 +667,5 @@ auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
 
     return {};
 }
+
+} // namespace Waved
