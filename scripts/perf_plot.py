@@ -11,9 +11,9 @@ on each row:
 * a green rectangle that spans the frame generation step,
 * a blue rectangle that spans the vsync step.
 """
-import csv
 import sys
 import argparse
+from perf import parse_updates_csv
 
 
 TIME_MARGIN = 500_000
@@ -21,25 +21,6 @@ TIME_UNIT_WIDTH = 0.000_1
 TIME_TICK_SPACE = 1_000_000
 UPDATE_ROW_HEIGHT = 10
 UPDATE_LABEL_SPACING = 5
-
-
-def parse_updates_csv(in_file):
-    reader = csv.DictReader(in_file, delimiter=",")
-    updates = list(reader)
-
-    for update in updates:
-        update["width"] = int(update["width"])
-        update["height"] = int(update["height"])
-        update["queue_time"] = int(update["queue_time"])
-        update["dequeue_time"] = int(update["dequeue_time"])
-        update["generate_times"] = \
-            list(map(int, update["generate_times"].split(":")))
-        update["vsync_times"] = \
-            list(map(int, update["vsync_times"].split(":")))
-        update["start"] = update["queue_time"]
-        update["end"] = update["vsync_times"][-1]
-
-    return updates
 
 
 def draw_updates(updates, out):
