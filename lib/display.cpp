@@ -146,6 +146,7 @@ Display::~Display()
 
 void Display::start()
 {
+#ifndef DRY_RUN
     this->set_power(true);
     this->update_temperature();
 
@@ -209,6 +210,7 @@ void Display::start()
     }
 
     this->framebuffer = reinterpret_cast<std::uint8_t*>(mmap_res);
+#endif // DRY_RUN
 
     // Initialize the null frame
     std::uint8_t* null_ptr = this->null_frame.data() + 2;
@@ -289,6 +291,7 @@ void Display::start()
         this->reset_frame(i);
     }
 
+#ifndef DRY_RUN
     // Start the processing threads
     this->stopping_generator = false;
     this->generator_thread = std::thread(&Display::run_generator_thread, this);
@@ -297,6 +300,7 @@ void Display::start()
     this->stopping_vsync = false;
     this->vsync_thread = std::thread(&Display::run_vsync_thread, this);
     pthread_setname_np(this->vsync_thread.native_handle(), "waved_vsync");
+#endif // DRY_RUN
 
     this->started = true;
 }
@@ -304,6 +308,7 @@ void Display::start()
 void Display::stop()
 {
     if (this->started) {
+#ifndef DRY_RUN
         // Wait for the current update to be processed then terminate
         this->stopping_generator = true;
         this->updates_cv.notify_one();
@@ -316,6 +321,7 @@ void Display::stop()
         if (this->framebuffer != nullptr) {
             munmap(this->framebuffer, this->fix_info.smem_len);
         }
+#endif // DRY_RUN
 
         this->started = false;
     }
@@ -325,6 +331,7 @@ void Display::stop()
 
 void Display::set_power(bool power_state)
 {
+#ifndef DRY_RUN
     if (power_state != this->power_state) {
         if (
             ioctl(
@@ -335,10 +342,14 @@ void Display::set_power(bool power_state)
             this->power_state = power_state;
         }
     }
+#endif // DRY_RUN
 }
 
 void Display::update_temperature()
 {
+#ifdef DRY_RUN
+    int result = 24;
+#else
     if (
         chrono::steady_clock::now() - this->temperature_last_read
         <= temperature_read_interval
@@ -374,6 +385,7 @@ void Display::update_temperature()
     }
 
     int result = std::stoi(buffer);
+#endif // DRY_RUN
     this->temperature = result;
     this->temperature_last_read = chrono::steady_clock::now();
 }
@@ -414,7 +426,10 @@ bool Display::push_update(
         return false;
     }
 
+#ifndef DRY_RUN
     std::lock_guard<std::mutex> lock(this->updates_lock);
+#endif // DRY_RUN
+
     this->pending_updates.emplace(Update{
         {this->next_update_id++}
         , mode
@@ -428,23 +443,37 @@ bool Display::push_update(
 #endif // ENABLE_PERF_REPORT
     });
 
+#ifndef DRY_RUN
     this->updates_cv.notify_one();
+#else
+    this->process_update();
+#endif // DRY_RUN
     return true;
 }
 
 void Display::run_generator_thread()
 {
     while (!this->stopping_generator) {
-        if (this->pop_update()) {
-            this->align_update();
-            this->generate_frames();
-            this->commit_update();
-        }
+        this->process_update();
+    }
+}
+
+void Display::process_update()
+{
+    if (this->pop_update()) {
+        this->align_update();
+        this->generate_frames();
+        this->commit_update();
     }
 }
 
 bool Display::pop_update()
 {
+#ifdef DRY_RUN
+    if (this->pending_updates.empty()) {
+        return false;
+    }
+#else
     std::unique_lock<std::mutex> lock(this->updates_lock);
     this->updates_cv.wait(lock, [this] {
         return !this->pending_updates.empty() || this->stopping_generator;
@@ -453,6 +482,7 @@ bool Display::pop_update()
     if (this->stopping_generator) {
         return false;
     }
+#endif // DRY_RUN
 
     this->generate_update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
@@ -715,6 +745,7 @@ void Display::generate_frames()
 #endif // ENABLE_PERF_REPORT
     }
 
+#ifndef DRY_RUN
     {
         std::unique_lock<std::mutex> lock(this->vsync_write_lock);
         this->vsync_can_write_cv.wait(lock, [this] {
@@ -727,6 +758,11 @@ void Display::generate_frames()
     this->vsync_can_write = false;
     this->vsync_can_read = true;
     this->vsync_can_read_cv.notify_one();
+#else
+#ifdef ENABLE_PERF_REPORT
+    this->make_perf_record();
+#endif // ENABLE_PERF_REPORT
+#endif // DRY_RUN
 }
 
 void Display::commit_update()
@@ -747,6 +783,7 @@ void Display::commit_update()
 
 void Display::run_vsync_thread()
 {
+#ifndef DRY_RUN
     std::size_t next_frame = 0;
     bool first_frame = true;
 
@@ -821,20 +858,33 @@ void Display::run_vsync_thread()
         this->vsync_can_read = false;
         this->vsync_can_write_cv.notify_one();
     }
+#endif // DRY_RUN
 }
 
 void Display::reset_frame(std::size_t frame_index)
 {
+#ifndef DRY_RUN
     std::copy(
         this->null_frame.cbegin(),
         this->null_frame.cend(),
         this->framebuffer + buf_frame * frame_index
     );
+#endif // DRY_RUN
 }
 
 #ifdef ENABLE_PERF_REPORT
 void Display::make_perf_record()
 {
+#ifdef DRY_RUN
+    const auto& update = this->generate_update;
+    this->perf_report << update.id << ','
+        << static_cast<int>(update.mode) << ','
+        << update.region.width << ','
+        << update.region.height << ','
+        << update.queue_time << ','
+        << update.dequeue_time << ','
+        << update.generate_times << ",\n";
+#else
     const auto& update = this->vsync_update;
     this->perf_report << update.id << ','
         << static_cast<int>(update.mode) << ','
@@ -844,6 +894,7 @@ void Display::make_perf_record()
         << update.dequeue_time << ','
         << update.generate_times << ','
         << update.vsync_times << '\n';
+#endif // DRY_RUN
 }
 
 std::string Display::get_perf_report() const

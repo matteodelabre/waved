@@ -308,6 +308,9 @@ private:
     std::thread generator_thread;
     void run_generator_thread();
 
+    /** Wait for the next update to be added to the queue and process it. */
+    void process_update();
+
     /**
      * Remove the next update from the queue (or wait if queue is empty).
      *

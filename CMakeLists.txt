@@ -6,11 +6,19 @@ project(waved VERSION 0.1.0)
 
 find_package(Threads REQUIRED)
 
-# Option to enable perf reporting
+# Option: Enable performance measurements and reporting for updates
 option(ENABLE_PERF_REPORT "Report performance information" OFF)
 
 if(ENABLE_PERF_REPORT)
     add_compile_definitions(ENABLE_PERF_REPORT)
+endif()
+
+# Option: Do not interact with the display, only generate frames
+# on the main thread
+option(DRY_RUN "Dry run: do not actually send updates" OFF)
+
+if(DRY_RUN)
+    add_compile_definitions(DRY_RUN)
 endif()
 
 # Enable C++17 support
