@@ -636,7 +636,7 @@ std::vector<bool> Display::check_consecutive()
 
 void Display::generate_frames()
 {
-    std::vector<bool> is_consecutive = this->check_consecutive();
+    /* std::vector<bool> is_consecutive = this->check_consecutive(); */
     auto& update = this->generate_update;
 
     const auto& region = update.region;
@@ -658,56 +658,36 @@ void Display::generate_frames()
 
     for (std::size_t k = 0; k < waveform.size(); ++k) {
         this->generate_buffer.emplace_back(this->null_frame);
-        std::uint8_t* data = this->generate_buffer.back().data()
-            + (margin_top + region.top) * buf_stride
-            + (margin_left + region.left / buf_actual_depth) * buf_depth;
-
         const auto& matrix = waveform[k];
-        const Intensity* prev = prev_base;
-        const Intensity* next = next_base;
 
-        std::size_t i = 0;
-        std::uint8_t byte1 = 0;
-        std::uint8_t byte2 = 0;
+        // Alias as 32-bits to store 4 bytes at once
+        auto* data = reinterpret_cast<std::uint32_t*>(
+                this->generate_buffer.back().data())
+            + (margin_top + region.top) * buf_width
+            + margin_left + region.left / buf_actual_depth;
+
+        // Alias as 64-bits to fetch 8 pixels at once
+        const auto* prev = reinterpret_cast<const std::uint64_t*>(prev_base);
+        const auto* next = reinterpret_cast<const std::uint64_t*>(next_base);
 
         for (std::size_t y = 0; y < region.height; ++y) {
             for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {
-                if (!is_consecutive[i]) {
-                    auto phase1 = matrix[*prev++][*next++];
-                    auto phase2 = matrix[*prev++][*next++];
-                    auto phase3 = matrix[*prev++][*next++];
-                    auto phase4 = matrix[*prev++][*next++];
-                    auto phase5 = matrix[*prev++][*next++];
-                    auto phase6 = matrix[*prev++][*next++];
-                    auto phase7 = matrix[*prev++][*next++];
-                    auto phase8 = matrix[*prev++][*next++];
+                auto prev_pixels = *prev++;
+                auto next_pixels = *next++;
+                auto result = *data & 0xFFFF0000;
 
-                    byte1 = (
-                        (static_cast<std::uint8_t>(phase5) << 6)
-                        | (static_cast<std::uint8_t>(phase6) << 4)
-                        | (static_cast<std::uint8_t>(phase7) << 2)
-                        | static_cast<std::uint8_t>(phase8)
-                    );
-
-                    byte2 = (
-                        (static_cast<std::uint8_t>(phase1) << 6)
-                        | (static_cast<std::uint8_t>(phase2) << 4)
-                        | (static_cast<std::uint8_t>(phase3) << 2)
-                        | static_cast<std::uint8_t>(phase4)
-                    );
-                } else {
-                    prev += buf_actual_depth;
-                    next += buf_actual_depth;
+                for (std::size_t i = 0; i < buf_actual_depth; ++i) {
+                    result |= static_cast<std::uint8_t>(
+                        matrix[prev_pixels >> (64 - (i + 1) * 8) & 0xFF]
+                              [next_pixels >> (64 - (i + 1) * 8) & 0xFF]
+                    ) << 2 * i;
                 }
 
-                *data++ = byte1;
-                *data++ = byte2;
-                data += 2;
-                ++i;
+                *data++ = result;
             }
 
-            prev += epd_width - region.width;
-            data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
+            prev += (epd_width - region.width) / buf_actual_depth;
+            data += buf_width - (region.width / buf_actual_depth);
         }
 
 #ifdef ENABLE_PERF_REPORT
