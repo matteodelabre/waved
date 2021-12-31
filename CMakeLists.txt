@@ -57,3 +57,7 @@ target_link_libraries(waved-demo waved)
 # WBF dump program
 add_executable(waved-dump src/dump/main.cpp)
 target_link_libraries(waved-dump waved)
+
+# rm2fb server
+add_executable(waved-rm2fb src/rm2fb/main.cpp)
+target_link_libraries(waved-rm2fb waved rt)
