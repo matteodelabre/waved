@@ -24,7 +24,7 @@ constexpr float to_float(uint16_t c)
 
 void do_update(Waved::Display &display, const swtfb::swtfb_update &s) {
 
-  auto mxcfb_update = s.update;
+  auto mxcfb_update = s.mdata.update;
   auto rect = mxcfb_update.update_region;
   std::vector<Waved::Intensity> buffer(rect.width * rect.height);
 
@@ -165,7 +165,7 @@ int main(int, const char**)
 			std::cerr << "HANDLING WAIT\n";
       break;
 //      fb.WaitForLastUpdate();
-      sem_t* sem = sem_open(buf.wait_update.sem_name, O_CREAT, 0644, 0);
+      sem_t* sem = sem_open(buf.mdata.wait_update.sem_name, O_CREAT, 0644, 0);
       if (sem != NULL) {
         sem_post(sem);
         sem_close(sem);

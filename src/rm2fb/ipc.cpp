@@ -14,29 +14,27 @@
 
 namespace swtfb {
 struct xochitl_data {
-  int x1;
-  int y1;
-  int x2;
-  int y2;
+    int x1;
+    int y1;
+    int x2;
+    int y2;
 
-  int waveform;
-  int flags;
+    int waveform;
+    int flags;
 };
 
 struct wait_sem_data {
-  char sem_name[512];
+    char sem_name[512];
 };
 
 struct swtfb_update {
-  long mtype;
+    long mtype;
 
-  union {
-    xochitl_data xochitl_update;
-
-    struct mxcfb_update_data update;
-    wait_sem_data wait_update;
-
-  };
+    union {
+        xochitl_data xochitl_update;
+        struct mxcfb_update_data update;
+        wait_sem_data wait_update;
+    } mdata;
 };
 
 namespace ipc {
@@ -93,7 +91,7 @@ public:
   swtfb_update recv() {
     swtfb_update buf;
     errno = 0;
-    auto len = msgrcv(msqid, &buf, sizeof(buf), 0, 0);
+    auto len = msgrcv(msqid, &buf, sizeof(buf.mdata), 0, MSG_NOERROR);
     if (len >= 0) {
       return buf;
     } else {
