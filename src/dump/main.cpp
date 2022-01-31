@@ -96,15 +96,27 @@ int main(int argc, const char** argv)
     try {
         const auto& waveform = table.lookup(mode, temperature);
         std::cerr << "Listing waveforms for mode " << mode << " and "
-            "temperature " << temperature << " °C\n\n";
+            "temperature " << temperature << " °C\n"
+            "(No-op waveforms are not shown)\n\n";
 
-        for (Waved::Intensity from = 0; from < Waved::intensity_values; from += 2) {
-            for (Waved::Intensity to = 0; to < Waved::intensity_values; to += 2) {
+        for (Waved::Intensity from = 0; from < Waved::intensity_values; ++from) {
+            for (Waved::Intensity to = 0; to < Waved::intensity_values; ++to) {
+                if (std::all_of(
+                    std::cbegin(waveform),
+                    std::cend(waveform),
+                    [from, to](const auto& matrix) {
+                        return matrix[from][to] == Waved::Phase::Noop;
+                    }
+                )) {
+                    // Skip no-op waveforms
+                    continue;
+                }
+
                 std::cerr << "(" << std::setw(2) << static_cast<int>(from)
                     << " -> " << std::setw(2) << static_cast<int>(to) << "): ";
 
                 for (const auto& matrix : waveform) {
-                    std::cout << (int) matrix[from][to];
+                    std::cout << static_cast<int>(matrix[from][to]);
                 }
 
                 std::cerr << '\n';
