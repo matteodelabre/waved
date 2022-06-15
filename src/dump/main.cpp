@@ -68,8 +68,15 @@ int main(int argc, const char** argv)
 
     if (argc < 2) {
         std::cout << "Frame rate: " << static_cast<int>(frame_rate) << " Hz\n";
-        std::cout << "Available modes: " << static_cast<int>(mode_count) << '\n';
-        std::cout << "Temperature ranges:\n";
+        std::cout << "\nAvailable modes:\n";
+
+        for (std::size_t mode = 0; mode < mode_count; ++mode) {
+            std::cout << "  " << mode << ": "
+                << Waved::mode_kind_to_string(table.get_kind_from_mode(mode))
+                << '\n';
+        }
+
+        std::cout << "\nTemperature ranges:\n";
 
         for (std::size_t i = 0; i < temps.size() - 1; ++i) {
             std::cout << "  " << std::setw(2) << static_cast<int>(temps[i])

@@ -18,13 +18,8 @@
 namespace Waved
 {
 
-/**
- * Waveform mode.
- *
- * Users can usually choose from several kinds of waveforms that provide
- * different trade-offs between image fidelity and rendering speed.
- */
-using Mode = std::uint8_t;
+/** Waveform mode ID. */
+using ModeID = std::uint8_t;
 
 /**
  * Temperature (in Celsius).
@@ -64,13 +59,14 @@ public:
     /**
      * Lookup the waveform for the given mode and temperature.
      *
-     * @param mode Mode.
+     * @param mode Mode ID or kind.
      * @param temperature Temperature in Celsius.
      * @return Corresponding waveform.
      * @throws std::out_of_range If the given mode or temperature is not
      * supported.
      */
-    const Waveform& lookup(int mode, int temperature) const;
+    const Waveform& lookup(ModeID mode, int temperature) const;
+
     using Lookup = std::vector<std::vector<std::size_t>>;
 
     /** Get the display frame rate. */
@@ -80,14 +76,17 @@ public:
     const std::vector<Temperature>& get_temperatures() const;
 
     /** Get the number of available modes. */
-    Mode get_mode_count() const;
+    ModeID get_mode_count() const;
+
+    /** Use heuristics to guess the mode kind associated to a given mode ID. */
+    ModeKind get_kind_from_mode(ModeID mode) const;
 
 private:
     // Display frame rate
     std::uint8_t frame_rate;
 
     // Number of available modes
-    Mode mode_count;
+    ModeID mode_count;
 
     // Set of temperature thresholds
     // The last value is the maximal operating temperature

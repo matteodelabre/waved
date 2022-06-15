@@ -391,7 +391,7 @@ void Display::update_temperature()
 }
 
 bool Display::push_update(
-    Mode mode,
+    ModeID mode,
     Region region,
     const std::vector<Intensity>& buffer
 )

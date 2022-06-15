@@ -83,7 +83,7 @@ public:
      * @return True if the update was pushed, false if it was deemed invalid.
      */
     bool push_update(
-        Mode mode,
+        ModeID mode,
         Region region,
         const std::vector<Intensity>& buffer
     );
@@ -246,7 +246,7 @@ private:
         std::vector<UpdateID> id;
 
         // Update mode
-        Mode mode;
+        ModeID mode;
 
         // Coordinates of the region affected by the update
         Region region{};

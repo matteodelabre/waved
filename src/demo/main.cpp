@@ -42,7 +42,7 @@ void do_block_gradients(Waved::Display& display)
         );
     }
 
-    for (Waved::Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::ModeID mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
             Waved::Region{
@@ -73,7 +73,7 @@ void do_continuous_gradients(Waved::Display& display)
         );
     }
 
-    for (Waved::Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::ModeID mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
             Waved::Region{
@@ -251,7 +251,7 @@ void do_image(Waved::Display& display)
         }
     }
 
-    for (Waved::Mode mode = 1; mode < 8; ++mode) {
+    for (Waved::ModeID mode = 1; mode < 8; ++mode) {
         display.push_update(
             mode,
             Waved::Region{

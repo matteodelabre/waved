@@ -21,7 +21,8 @@ namespace Waved
 WaveformTable::WaveformTable()
 {}
 
-auto WaveformTable::lookup(int mode, int temperature) const -> const Waveform&
+auto WaveformTable::lookup(ModeID mode, int temperature) const
+-> const Waveform&
 {
     if (mode < 0 || mode >= this->mode_count) {
         std::ostringstream message;
@@ -78,9 +79,120 @@ auto WaveformTable::get_temperatures() const -> const std::vector<Temperature>&
     return this->temperatures;
 }
 
-auto WaveformTable::get_mode_count() const -> Mode
+auto WaveformTable::get_mode_count() const -> ModeID
 {
     return this->mode_count;
+}
+
+}
+
+/** Detect Initialization (INIT) mode. */
+bool is_init_mode(
+    const std::vector<std::size_t>& indices,
+    const std::vector<Waved::Waveform>& waveforms
+)
+{
+    // Transitions should all be the same regardless of the initial
+    // or target intensity value
+    for (const std::size_t index : indices) {
+        for (const auto& matrix : waveforms[index]) {
+            for (
+                Waved::Intensity from = 0;
+                from < Waved::intensity_values;
+                ++from
+            ) {
+                for (
+                    Waved::Intensity to = 0;
+                    to < Waved::intensity_values;
+                    ++to
+                ) {
+                    if (matrix[0][0] != matrix[from][to]) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+namespace Waved
+{
+
+auto WaveformTable::get_kind_from_mode(ModeID mode) const -> ModeKind
+{
+    if (is_init_mode(this->waveform_lookup[mode], this->waveforms)) {
+        return ModeKind::INIT;
+    }
+
+    // Detect which intensity transitions are no-ops (at temperature 21 °C)
+    const Waveform& sample_waveform = this->lookup(mode, 21);
+    std::array<std::array<bool, intensity_values>, intensity_values> no_ops;
+
+    for (Intensity from = 0; from < intensity_values; ++from) {
+        for (Intensity to = 0; to < intensity_values; ++to) {
+            no_ops[from][to] = std::all_of(
+                std::cbegin(sample_waveform),
+                std::cend(sample_waveform),
+                [from, to](const auto& matrix) {
+                    return matrix[from][to] == Waved::Phase::Noop;
+                }
+            );
+        }
+    }
+
+    // “Regal” waveforms support special transitions
+    bool regalable = (
+        !no_ops[28][29] && !no_ops[28][31]
+        && !no_ops[29][29] && !no_ops[29][31]
+        && !no_ops[30][29] && !no_ops[30][31]
+    );
+
+    // Quantify the amount of supported intensities in sources and targets
+    double defined_sources = 0;
+    double defined_targets = 0;
+
+    for (Intensity from = 0; from < intensity_values; ++from) {
+        bool is_defined = false;
+
+        for (Intensity to = 0; to < intensity_values; ++to) {
+            if (!no_ops[from][to]) {
+                ++defined_targets;
+                is_defined = true;
+            }
+        }
+
+        if (is_defined) {
+            defined_sources += 1;
+        }
+    }
+
+    defined_targets /= defined_sources;
+
+    if (defined_sources >= 16) {
+        if (defined_targets < 2) {
+            return ModeKind::DU;
+        }
+
+        if (defined_targets < 4) {
+            return ModeKind::DU4;
+        }
+
+        if (defined_targets >= 16) {
+            if (regalable) {
+                return ModeKind::GLR16;
+            }
+
+            return ModeKind::GC16;
+        }
+    }
+
+    if (defined_sources <= 8 && defined_targets <= 1) {
+        return ModeKind::A2;
+    }
+
+    return ModeKind::UNKNOWN;
 }
 
 } // namespace Waved

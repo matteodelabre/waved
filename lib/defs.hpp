@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace Waved
@@ -64,6 +65,41 @@ struct Region
     std::uint32_t width;
     std::uint32_t height;
 };
+
+/**
+ * Waveform types.
+ *
+ * Users can usually choose from several kinds of waveforms that provide
+ * different trade-offs between image fidelity and rendering speed.
+ *
+ * See <https://www.waveshare.com/w/upload/c/c4/E-paper-mode-declaration.pdf>
+ */
+enum class ModeKind
+{
+    UNKNOWN,
+
+    // Initialization mode used to force all pixels to go back to a
+    // known white state
+    INIT,
+
+    // Fast, non-flashy update that only supports transitions to black or white
+    DU,
+
+    // Same as DU but supports 4 gray tones
+    DU4,
+
+    // Faster than DU and only supports transitions *between* black and white
+    A2,
+
+    // Full resolution mode (16 gray tones)
+    GC16,
+
+    // Full resolution mode with support for Regal
+    GLR16,
+};
+
+/** Get a human-readable name for a mode kind. */
+std::string mode_kind_to_string(ModeKind);
 
 } // namespace Waved
 
