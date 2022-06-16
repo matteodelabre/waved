@@ -1,6 +1,6 @@
 /**
  * @file Utility functions to compute various kinds of checksums.
- * SPDX-FileCopyrightText: 2021 Mattéo Delabre <spam@delab.re>
+ * SPDX-FileCopyrightText: 2021-2022 Mattéo Delabre <git.matteo@delab.re>
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
