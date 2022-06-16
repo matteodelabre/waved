@@ -295,7 +295,6 @@ constexpr auto expected_run_type = 17;
 constexpr auto expected_fpl_platform = 0;
 constexpr auto expected_adhesive_run = 25;
 constexpr auto expected_waveform_type = 81;
-constexpr auto expected_fpl_size = 0;
 constexpr auto expected_waveform_revision = 0;
 constexpr auto expected_vcom_offset = 0;
 constexpr auto expected_fvsn = 1;
@@ -375,13 +374,6 @@ auto parse_header(const Buffer& buffer) -> wbf_header
         message << "Invalid waveform type in WBF header: expected "
             << expected_waveform_type << ", actual "
             << (int) header.waveform_type;
-        throw std::runtime_error(message.str());
-    }
-
-    if (header.fpl_size != expected_fpl_size) {
-        std::ostringstream message;
-        message << "Invalid FPL size in WBF header: expected "
-            << expected_fpl_size << ", actual " << (int) header.fpl_size;
         throw std::runtime_error(message.str());
     }
 
