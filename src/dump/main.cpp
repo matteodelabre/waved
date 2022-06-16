@@ -72,7 +72,7 @@ int main(int argc, const char** argv)
 
         for (std::size_t mode = 0; mode < mode_count; ++mode) {
             std::cout << "  " << mode << ": "
-                << Waved::mode_kind_to_string(table.get_kind_from_mode(mode))
+                << Waved::mode_kind_to_string(table.get_mode_kind(mode))
                 << '\n';
         }
 

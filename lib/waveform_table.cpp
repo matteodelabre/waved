@@ -84,59 +84,71 @@ auto WaveformTable::get_mode_count() const -> ModeID
     return this->mode_count;
 }
 
+auto WaveformTable::get_mode_kind(ModeID mode) const -> ModeKind
+{
+    return this->mode_kind_by_id[mode];
 }
 
-/** Detect Initialization (INIT) mode. */
-bool is_init_mode(
-    const std::vector<std::size_t>& indices,
-    const std::vector<Waved::Waveform>& waveforms
-)
+auto WaveformTable::get_mode_id(ModeKind mode) const -> ModeID
 {
-    // Transitions should all be the same regardless of the initial
-    // or target intensity value
-    for (const std::size_t index : indices) {
-        for (const auto& matrix : waveforms[index]) {
-            for (
-                Waved::Intensity from = 0;
-                from < Waved::intensity_values;
-                ++from
-            ) {
-                for (
-                    Waved::Intensity to = 0;
-                    to < Waved::intensity_values;
-                    ++to
-                ) {
-                    if (matrix[0][0] != matrix[from][to]) {
-                        return false;
-                    }
+    auto id_iter = this->mode_id_by_kind.find(mode);
+
+    if (id_iter == this->mode_id_by_kind.end()) {
+        std::ostringstream message;
+        message << "Mode kind " << mode_kind_to_string(mode) << " is not "
+            "supported";
+        throw std::out_of_range(message.str());
+    }
+
+    return id_iter->second;
+}
+
+namespace
+{
+
+/**
+ * Use heuristics to classify a mode into a mode kind given
+ * a sample waveform from that mode.
+ */
+auto classify_mode_kind(const Waveform& waveform) -> ModeKind
+{
+    // Detect INIT mode: transitions should be all the same regardless
+    // of the initial or target intensity values
+    bool is_init = true;
+
+    for (const auto& matrix : waveform) {
+        for (Intensity from = 0; from < intensity_values; ++from) {
+            for (Intensity to = 0; to < intensity_values; ++to) {
+                if (matrix[0][0] != matrix[from][to]) {
+                    is_init = false;
+                    break;
                 }
             }
+
+            if (!is_init) {
+                break;
+            }
+        }
+
+        if (!is_init) {
+            break;
         }
     }
 
-    return true;
-}
-
-namespace Waved
-{
-
-auto WaveformTable::get_kind_from_mode(ModeID mode) const -> ModeKind
-{
-    if (is_init_mode(this->waveform_lookup[mode], this->waveforms)) {
+    if (is_init) {
         return ModeKind::INIT;
     }
 
-    // Detect which intensity transitions are no-ops (at temperature 21 °C)
-    const Waveform& sample_waveform = this->lookup(mode, 21);
+    // Detect which intensity transitions are no-ops
     std::array<std::array<bool, intensity_values>, intensity_values> no_ops;
 
     for (Intensity from = 0; from < intensity_values; ++from) {
         for (Intensity to = 0; to < intensity_values; ++to) {
             no_ops[from][to] = std::all_of(
-                std::cbegin(sample_waveform),
-                std::cend(sample_waveform),
+                std::cbegin(waveform),
+                std::cend(waveform),
                 [from, to](const auto& matrix) {
-                    return matrix[from][to] == Waved::Phase::Noop;
+                    return matrix[from][to] == Phase::Noop;
                 }
             );
         }
@@ -195,7 +207,28 @@ auto WaveformTable::get_kind_from_mode(ModeID mode) const -> ModeKind
     return ModeKind::UNKNOWN;
 }
 
-} // namespace Waved
+} // anonymous namespace
+
+void WaveformTable::populate_mode_kind_mappings()
+{
+    mode_kind_by_id.resize(this->mode_count);
+    mode_id_by_kind.clear();
+
+    constexpr auto sample_temperature = 21;
+
+    for (ModeID mode = 0; mode < this->mode_count; ++mode) {
+        auto kind = classify_mode_kind(this->lookup(mode, sample_temperature));
+
+        if (kind == ModeKind::UNKNOWN) {
+            std::cerr << "[warn] Could not detect mode kind for mode #"
+                << static_cast<int>(mode) << '\n';
+        } else {
+            this->mode_id_by_kind.insert({kind, mode});
+        }
+
+        this->mode_kind_by_id[mode] = kind;
+    }
+}
 
 namespace
 {
@@ -293,7 +326,7 @@ auto parse_header(const Buffer& buffer) -> wbf_header
     header.wmta = le32toh(header.wmta);
 
     // Verify checksums
-    std::uint8_t checksum1_verif = Waved::basic_checksum(begin + 8, begin + 31);
+    std::uint8_t checksum1_verif = basic_checksum(begin + 8, begin + 31);
 
     if (header.checksum1 != checksum1_verif) {
         std::ostringstream message;
@@ -303,7 +336,7 @@ auto parse_header(const Buffer& buffer) -> wbf_header
         throw std::runtime_error(message.str());
     }
 
-    std::uint8_t checksum2_verif = Waved::basic_checksum(begin + 32, begin + 47);
+    std::uint8_t checksum2_verif = basic_checksum(begin + 32, begin + 47);
 
     if (header.checksum2 != checksum2_verif) {
         std::ostringstream message;
@@ -395,9 +428,9 @@ auto parse_header(const Buffer& buffer) -> wbf_header
 /** Parse the set of temperature ranges from a WBF file. */
 auto parse_temperatures(
     const wbf_header& header, Buffer::const_iterator& begin
-) -> std::vector<Waved::Temperature>
+) -> std::vector<Temperature>
 {
-    std::vector<Waved::Temperature> result;
+    std::vector<Temperature> result;
     std::size_t count = header.temp_range_count + 2;
     result.reserve(count);
 
@@ -407,7 +440,7 @@ auto parse_temperatures(
         result.emplace_back(*it);
     }
 
-    std::uint8_t checksum_verif = Waved::basic_checksum(begin, it);
+    std::uint8_t checksum_verif = basic_checksum(begin, it);
     std::uint8_t checksum_expect = *it;
 
     if (checksum_expect != checksum_verif) {
@@ -473,12 +506,12 @@ auto find_waveform_blocks(
 
 /** Parse a waveform block in a WBF file. */
 auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
--> Waved::Waveform
+-> Waveform
 {
     end -= 2;
 
-    Waved::PhaseMatrix matrix;
-    Waved::Waveform result;
+    PhaseMatrix matrix;
+    Waveform result;
 
     std::uint8_t i = 0;
     std::uint8_t j = 0;
@@ -493,10 +526,10 @@ auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
             continue;
         }
 
-        auto p4 = static_cast<Waved::Phase>(byte & 3);
-        auto p3 = static_cast<Waved::Phase>((byte >> 2) & 3);
-        auto p2 = static_cast<Waved::Phase>((byte >> 4) & 3);
-        auto p1 = static_cast<Waved::Phase>(byte >> 6);
+        auto p4 = static_cast<Phase>(byte & 3);
+        auto p3 = static_cast<Phase>((byte >> 2) & 3);
+        auto p2 = static_cast<Phase>((byte >> 4) & 3);
+        auto p1 = static_cast<Phase>(byte >> 6);
 
         int repeat = 1;
 
@@ -517,12 +550,12 @@ auto parse_waveform(Buffer::const_iterator begin, Buffer::const_iterator end)
             matrix[j++][i] = p3;
             matrix[j++][i] = p4;
 
-            if (j == Waved::intensity_values) {
+            if (j == intensity_values) {
                 j = 0;
                 ++i;
             }
 
-            if (i == Waved::intensity_values) {
+            if (i == intensity_values) {
                 i = 0;
                 result.push_back(matrix);
             }
@@ -541,9 +574,9 @@ auto parse_waveforms(
     const std::vector<std::uint32_t>& blocks,
     Buffer::const_iterator file_begin,
     Buffer::const_iterator table_begin
-) -> std::pair<std::vector<Waved::Waveform>, Waved::WaveformTable::Lookup>
+) -> std::pair<std::vector<Waveform>, WaveformTable::Lookup>
 {
-    std::vector<Waved::Waveform> waveforms;
+    std::vector<Waveform> waveforms;
 
     for (auto it = blocks.cbegin(); std::next(it) != blocks.cend(); ++it) {
         waveforms.emplace_back(parse_waveform(
@@ -554,7 +587,7 @@ auto parse_waveforms(
 
     std::size_t mode_count = header.mode_count + 1;
     std::size_t temp_count = header.temp_range_count + 1;
-    Waved::WaveformTable::Lookup waveform_lookup;
+    WaveformTable::Lookup waveform_lookup;
     waveform_lookup.reserve(mode_count);
 
     for (std::size_t mode = 0; mode < mode_count; ++mode) {
@@ -577,9 +610,6 @@ auto parse_waveforms(
 }
 
 } // anonymous namespace
-
-namespace Waved
-{
 
 auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
 {
@@ -635,6 +665,7 @@ auto WaveformTable::from_wbf(std::istream& file) -> WaveformTable
 
     result.waveforms = std::move(waveforms.first);
     result.waveform_lookup = std::move(waveforms.second);
+    result.populate_mode_kind_mappings();
     return result;
 }
 
@@ -650,8 +681,6 @@ auto WaveformTable::from_wbf(const char* path) -> WaveformTable
 
     return WaveformTable::from_wbf(file);
 }
-
-} // namespace Waved
 
 namespace
 {
@@ -738,9 +767,6 @@ auto decode_fpl_number(const std::string& barcode) -> std::int16_t
 }
 
 } // anonymous namespace
-
-namespace Waved
-{
 
 auto WaveformTable::discover_wbf_file() -> std::optional<std::string>
 {

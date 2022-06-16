@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iostream>
 #include <array>
+#include <unordered_map>
 #include <vector>
 #include <optional>
 
@@ -59,11 +60,10 @@ public:
     /**
      * Lookup the waveform for the given mode and temperature.
      *
-     * @param mode Mode ID or kind.
+     * @param mode Mode ID.
      * @param temperature Temperature in Celsius.
      * @return Corresponding waveform.
-     * @throws std::out_of_range If the given mode or temperature is not
-     * supported.
+     * @throws std::out_of_range If the given temperature is not supported.
      */
     const Waveform& lookup(ModeID mode, int temperature) const;
 
@@ -78,8 +78,17 @@ public:
     /** Get the number of available modes. */
     ModeID get_mode_count() const;
 
-    /** Use heuristics to guess the mode kind associated to a given mode ID. */
-    ModeKind get_kind_from_mode(ModeID mode) const;
+    /** Get the mode kind for a given mode ID. */
+    ModeKind get_mode_kind(ModeID mode) const;
+
+    /**
+     * Find the mode ID for a given mode kind.
+     *
+     * @param mode Mode kind.
+     * @return Corresponding mode ID.
+     * @throws std::out_of_range If the given mode kind is not supported.
+     */
+    ModeID get_mode_id(ModeKind mode) const;
 
 private:
     // Display frame rate
@@ -87,6 +96,16 @@ private:
 
     // Number of available modes
     ModeID mode_count;
+
+    // Mappings of mode IDs to mode kinds and reverse mapping
+    std::vector<ModeKind> mode_kind_by_id;
+    std::unordered_map<ModeKind, ModeID> mode_id_by_kind;
+
+    /**
+     * Scan available modes and assign them a mode kind based on which
+     * features they support.
+     */
+    void populate_mode_kind_mappings();
 
     // Set of temperature thresholds
     // The last value is the maximal operating temperature

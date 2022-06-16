@@ -77,11 +77,16 @@ public:
     /**
      * Add an update to the queue.
      *
-     * @param mode Update mode to use.
+     * @param mode Update mode to use (ID or kind).
      * @param region Coordinates of the region affected by the update.
      * @param buffer New values for the pixels in the updated region.
      * @return True if the update was pushed, false if it was deemed invalid.
      */
+    bool push_update(
+        ModeKind mode,
+        Region region,
+        const std::vector<Intensity>& buffer
+    );
     bool push_update(
         ModeID mode,
         Region region,

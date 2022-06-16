@@ -49,12 +49,14 @@ void copy_rect(
     }
 }
 
+#ifdef ENABLE_PERF_REPORT
 std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
 {
     out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
         .count();
     return out;
 }
+#endif // ENABLE_PERF_REPORT
 
 template<typename Elem>
 std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
@@ -388,6 +390,15 @@ void Display::update_temperature()
 #endif // DRY_RUN
     this->temperature = result;
     this->temperature_last_read = chrono::steady_clock::now();
+}
+
+bool Display::push_update(
+    ModeKind mode,
+    Region region,
+    const std::vector<Intensity>& buffer
+)
+{
+    return this->push_update(this->table.get_mode_id(mode), region, buffer);
 }
 
 bool Display::push_update(
@@ -806,8 +817,8 @@ void Display::run_vsync_thread()
             return;
         }
 
-        Update& update = this->vsync_update;
 #if ENABLE_PERF_REPORT
+        Update& update = this->vsync_update;
         update.vsync_times.resize(this->vsync_buffer.size() + 1);
         update.vsync_times[0] = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT

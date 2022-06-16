@@ -19,7 +19,7 @@
 void do_init(Waved::Display& display)
 {
     display.push_update(
-        /* mode = */ 0,
+        Waved::ModeKind::INIT,
         Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
@@ -96,7 +96,7 @@ void do_all_diff(Waved::Display& display)
     }
 
     display.push_update(
-        /* mode = */ 2,
+        Waved::ModeKind::GC16,
         Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
@@ -116,7 +116,7 @@ void do_random(Waved::Display& display)
     }
 
     display.push_update(
-        /* mode = */ 2,
+        Waved::ModeKind::GC16,
         Waved::Region{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
@@ -147,7 +147,7 @@ void do_spiral(Waved::Display& display)
         std::uint32_t y = height / 2 - std::round(std::sin(t) * ampl * scale);
 
         display.push_update(
-            /* mode = */ 6,
+            Waved::ModeKind::A2,
             Waved::Region{
                 /* top = */ y, /* left = */ x,
                 /* width = */ stencil, /* height = */ stencil
