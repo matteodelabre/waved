@@ -2,7 +2,7 @@
 
 _waved_ is aimed at becoming a userspace driver for the reMarkable 2 E-Ink controller.
 
-**Disclaimer: This is still a prototype. It might damage your E-Ink display.**
+**Disclaimer: This is still a prototype. Use at your own risk.**
 
 ### Demo
 
