@@ -72,11 +72,25 @@ bool equal_rect(
 
 } // anonymous namespace
 
-bool Update::merge(
-    Update& update,
-    const Intensity* background,
-    std::uint32_t background_width
-)
+void Update::apply(Intensity* target, std::uint32_t target_width)
+{
+    copy_rect(
+        /* source = */ this->buffer.data(),
+        /* source_region = */ UpdateRegion{
+            /* top = */ 0u,
+            /* left = */ 0u,
+            /* width = */ this->region.width,
+            /* height = */ this->region.height
+        },
+        /* source_width = */ this->region.width,
+        /* dest = */ target,
+        /* dest_top = */ this->region.top,
+        /* dest_left = */ this->region.left,
+        /* dest_width = */ target_width
+    );
+}
+
+bool Update::merge(Update& update)
 {
     if (this->immediate != update.immediate) {
         return false;
@@ -86,77 +100,19 @@ bool Update::merge(
         return false;
     }
 
-    UpdateRegion merged_region{};
-    merged_region.extend(this->region);
+    UpdateRegion merged_region = this->region;
     merged_region.extend(update.region);
 
-    // TODO: Reduce copies and reallocations
-
-    // Create merged buffer with overlayed current intensities,
-    // current update and merged update
-    std::vector<Intensity> merged_buffer(
-        merged_region.width * merged_region.height
-    );
-
-    copy_rect(
-        /* source = */ background,
-        /* source_region = */ merged_region,
-        /* source_width = */ background_width,
-        /* dest = */ merged_buffer.data(),
-        /* dest_top = */ 0u,
-        /* dest_left = */ 0u,
-        /* dest_width = */ merged_region.width
-    );
-
-    copy_rect(
-        /* source = */ this->buffer.data(),
-        /* source_region = */ UpdateRegion{
-            0, 0,
-            this->region.width, this->region.height
-        },
-        /* source_width = */ this->region.width,
-        /* dest = */ merged_buffer.data(),
-        /* dest_top = */ this->region.top - merged_region.top,
-        /* dest_left = */ this->region.left - merged_region.left,
-        /* dest_width = */ merged_region.width
-    );
-
-    copy_rect(
-        /* source = */ update.buffer.data(),
-        /* source_region = */ UpdateRegion{
-            0, 0,
-            update.region.width, update.region.height
-        },
-        /* source_width = */ update.region.width,
-        /* dest = */ merged_buffer.data(),
-        /* dest_top = */ update.region.top - merged_region.top,
-        /* dest_left = */ update.region.left - merged_region.left,
-        /* dest_width = */ merged_region.width
-    );
-
-    if (!equal_rect(
-        /* buf1 = */ this->buffer.data(),
-        /* region1 = */ UpdateRegion{
-            0, 0,
-            this->region.width, this->region.height
-        },
-        /* width1 = */ this->region.width,
-        /* buf2 = */ merged_buffer.data(),
-        /* top2 = */ this->region.top - merged_region.top,
-        /* left2 = */ this->region.left - merged_region.left,
-        /* width2 = */ merged_region.width
-    )) {
-        // Conflicting update contents
-        return false;
-    }
+    /* UpdateRegion shared_region = this->region; */
+    /* shared_region.intersect(update.region); */
+    // TODO: Check that there’s no conflict in shared_region
 
     std::copy(
         update.id.cbegin(), update.id.cend(),
         std::back_inserter(this->id)
     );
 
-    this->region = std::move(merged_region);
-    this->buffer = std::move(merged_buffer);
+    this->region = merged_region;
     return true;
 }
 

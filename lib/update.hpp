@@ -34,6 +34,9 @@ struct Region
     /** Extend this region to encompass a point. */
     void extend(Coordinate x, Coordinate y);
 
+    /** Intersect this region with another one. */
+    void intersect(const Region<Coordinate>& region);
+
     /** Check if this region contains another one. */
     bool contains(const Region<Coordinate>& region);
 
@@ -66,6 +69,9 @@ struct Update
     // Buffer containing the target intensities of the region
     std::vector<Intensity> buffer;
 
+    /** Copy the update data to an intensity buffer. */
+    void apply(Intensity* target, std::uint32_t target_width);
+
     /**
      * Try to merge another update into this update.
      *
@@ -73,16 +79,9 @@ struct Update
      * and immediate flag value, and have non-conflicting contents.
      *
      * @param update Update to merge.
-     * @param background Background buffer to use for encompassed zones
-     * that are not defined by this update or the merged one.
-     * @param background_width Total width of the background buffer.
      * @returns True if the merge succeeded, false otherwise.
      */
-    bool merge(
-        Update& update,
-        const Intensity* background,
-        std::uint32_t background_width
-    );
+    bool merge(Update& update);
 
     /** Crop this update to a given rectangle. */
     void crop(const UpdateRegion& target);

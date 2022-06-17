@@ -23,19 +23,19 @@ void Region<Coordinate>::extend(const Region<Coordinate>& region)
 
     auto top = std::min(this->top, region.top);
     auto left = std::min(this->left, region.left);
-    auto width = std::max(
+    auto right = std::max(
         this->left + this->width,
         region.left + region.width
-    ) - left;
-    auto height = std::max(
+    );
+    auto bottom = std::max(
         this->top + this->height,
         region.top + region.height
-    ) - top;
+    );
 
     this->top = top;
     this->left = left;
-    this->width = width;
-    this->height = height;
+    this->width = right - left;
+    this->height = bottom - top;
 }
 
 template<typename Coordinate>
@@ -47,6 +47,40 @@ void Region<Coordinate>::extend(Coordinate x, Coordinate y)
         /* width = */ 1,
         /* height = */ 1
     });
+}
+
+template<typename Coordinate>
+void Region<Coordinate>::intersect(const Region<Coordinate>& region)
+{
+    if (this->width == 0 && this->height == 0) {
+        return;
+    }
+
+    auto top = std::max(this->top, region.top);
+    auto left = std::max(this->left, region.left);
+    auto right = std::min(
+        this->left + this->width,
+        region.left + region.width
+    );
+    auto bottom = std::min(
+        this->top + this->height,
+        region.top + region.height
+    );
+
+    this->top = top;
+    this->left = left;
+
+    if (right < left) {
+        this->width = 0;
+    } else {
+        this->width = right - left;
+    }
+
+    if (bottom < top) {
+        this->height = 0;
+    } else {
+        this->height = bottom - top;
+    }
 }
 
 template<typename Coordinate>

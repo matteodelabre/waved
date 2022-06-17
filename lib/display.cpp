@@ -470,8 +470,6 @@ void Display::process_update()
         } else {
             this->generate_batch(update);
         }
-
-        this->commit_update(update);
     }
 }
 
@@ -501,21 +499,18 @@ std::optional<Update> Display::pop_update()
     return {std::move(update)};
 }
 
-void Display::merge_updates(Update& cur_update)
+void Display::merge_updates(Update& cur_update, IntensityArray& intensity)
 {
     std::lock_guard<std::mutex> lock(this->updates_lock);
 
     while (!this->pending_updates.empty()) {
         Update& next_update = this->pending_updates.front();
 
-        if (!cur_update.merge(
-            next_update,
-            this->current_intensity.data(),
-            epd_width
-        )) {
+        if (!cur_update.merge(next_update)) {
             return;
         }
 
+        next_update.apply(intensity.data(), epd_width);
         this->pending_updates.pop();
     }
 }
@@ -579,6 +574,13 @@ std::vector<bool> Display::check_consecutive(const Update& update)
 
 void Display::generate_batch(Update& update)
 {
+    const auto& waveform = this->table.lookup(update.mode, this->temperature);
+
+    // Target intensity values
+    static IntensityArray next_intensity;
+    next_intensity = this->current_intensity;
+    update.apply(next_intensity.data(), epd_width);
+
     std::vector<bool> is_consecutive = this->check_consecutive(update);
 
     /* this->merge_updates(update); */
@@ -587,10 +589,9 @@ void Display::generate_batch(Update& update)
     const Intensity* prev_base = this->current_intensity.data()
         + region.top * epd_width
         + region.left;
-    const Intensity* next_base = update.buffer.data();
-    const Waveform& waveform = this->table.lookup(
-        update.mode, this->temperature
-    );
+    const Intensity* next_base = next_intensity.data()
+        + region.top * epd_width
+        + region.left;
 
 #if ENABLE_PERF_REPORT
     update.generate_times.resize(waveform.size() + 1);
@@ -651,6 +652,7 @@ void Display::generate_batch(Update& update)
             }
 
             prev += epd_width - region.width;
+            next += epd_width - region.width;
             data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
         }
 
@@ -660,16 +662,22 @@ void Display::generate_batch(Update& update)
     }
 
     this->send_frames();
+    this->current_intensity = next_intensity;
 }
 
 void Display::generate_immediate(Update& update)
 {
-    // Stores which “step” of the waveform each pixel is on
+    const auto& waveform = this->table.lookup(update.mode, this->temperature);
+    const auto step_count = waveform.size();
+
+    // Tells which “step” of the waveform each pixel is on
     static std::array<std::array<std::size_t, epd_width>, epd_height> steps;
     steps.fill({});
 
-    const auto& waveform = this->table.lookup(update.mode, this->temperature);
-    const auto step_count = waveform.size();
+    // Target intensity values
+    static IntensityArray next_intensity;
+    next_intensity = this->current_intensity;
+    update.apply(next_intensity.data(), epd_width);
 
     this->generate_buffer.reserve(1);
     auto finished = false;
@@ -678,7 +686,7 @@ void Display::generate_immediate(Update& update)
         finished = true;
 
         // Merge compatible updates
-        this->merge_updates(update);
+        this->merge_updates(update, next_intensity);
 
         // Prepare next frame and advance each pixel step
         this->generate_buffer.clear();
@@ -700,7 +708,8 @@ void Display::generate_immediate(Update& update)
 
         const Intensity* prev = this->current_intensity.data()
             + update.region.top * epd_width + update.region.left;
-        const Intensity* next = update.buffer.data();
+        const Intensity* next = next_intensity.data()
+            + update.region.top * epd_width + update.region.left;
 
         for (
             std::size_t y = aligned_region.top;
@@ -739,6 +748,7 @@ void Display::generate_immediate(Update& update)
             }
 
             prev += epd_width - update.region.width;
+            next += epd_width - update.region.width;
             data += (
                 buf_stride
                 - (aligned_region.width / buf_actual_depth) * buf_depth
@@ -750,9 +760,11 @@ void Display::generate_immediate(Update& update)
         }
 
         this->send_frames();
-        update.crop(active_region);
+        update.region = active_region;
         /* std::cout << "active: top " << update.region.top << " left " << update.region.left << " width " << update.region.width << " height " << update.region.height << '\n'; */
     }
+
+    this->current_intensity = next_intensity;
 }
 
 void Display::send_frames()
@@ -771,21 +783,6 @@ void Display::send_frames()
     this->vsync_can_read = true;
     this->vsync_can_read_cv.notify_one();
 #endif
-}
-
-void Display::commit_update(const Update& update)
-{
-    const auto& region = update.region;
-
-    Intensity* prev = this->current_intensity.data()
-        + epd_width * region.top + region.left;
-    const Intensity* next = update.buffer.data();
-
-    for (std::size_t i = 0; i < region.height; ++i) {
-        std::copy(next, next + region.width, prev);
-        prev += epd_width;
-        next += region.width;
-    }
 }
 
 void Display::run_vsync_thread()
