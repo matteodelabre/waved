@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cmath>
 #include <cerrno>
+#include <endian.h>
 #include <fstream>
 #include <filesystem>
 #include <iostream>
@@ -394,15 +395,22 @@ void Display::update_temperature()
 
 bool Display::push_update(
     ModeKind mode,
+    bool immediate,
     Region region,
     const std::vector<Intensity>& buffer
 )
 {
-    return this->push_update(this->table.get_mode_id(mode), region, buffer);
+    return this->push_update(
+        this->table.get_mode_id(mode),
+        immediate,
+        region,
+        buffer
+    );
 }
 
 bool Display::push_update(
     ModeID mode,
+    bool immediate,
     Region region,
     const std::vector<Intensity>& buffer
 )
@@ -444,6 +452,7 @@ bool Display::push_update(
     this->pending_updates.emplace(Update{
         {this->next_update_id++}
         , mode
+        , immediate
         , region
         , std::move(trans_buffer)
 #ifdef ENABLE_PERF_REPORT
@@ -471,18 +480,28 @@ void Display::run_generator_thread()
 
 void Display::process_update()
 {
-    if (this->pop_update()) {
-        this->align_update();
-        this->generate_frames();
-        this->commit_update();
+    auto maybe_update = this->pop_update();
+
+    if (maybe_update) {
+        auto update = *maybe_update;
+
+        /* while (this->merge_update()); */
+
+        if (update.immediate) {
+            this->generate_immediate(update);
+        } else {
+            this->generate_batch(update);
+        }
+
+        this->commit_update(update);
     }
 }
 
-bool Display::pop_update()
+std::optional<Display::Update> Display::pop_update()
 {
 #ifdef DRY_RUN
     if (this->pending_updates.empty()) {
-        return false;
+        return {};
     }
 #else
     std::unique_lock<std::mutex> lock(this->updates_lock);
@@ -491,151 +510,132 @@ bool Display::pop_update()
     });
 
     if (this->stopping_generator) {
-        return false;
+        return {};
     }
 #endif // DRY_RUN
 
-    this->generate_update = std::move(this->pending_updates.front());
+    auto update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
-
-    while (this->merge_update());
 
 #ifdef ENABLE_PERF_REPORT
     this->generate_update.dequeue_time = chrono::steady_clock::now();
 #endif // ENABLE_PERF_REPORT
-    return true;
+    return {std::move(update)};
 }
 
-auto Display::merge_update() -> bool
+void Display::merge_updates(Update& cur_update)
 {
-    if (this->pending_updates.empty()) {
-        return false;
+    std::lock_guard<std::mutex> lock(this->updates_lock);
+
+    while (!this->pending_updates.empty()) {
+        Update& next_update = this->pending_updates.front();
+
+        if (cur_update.immediate != next_update.immediate) {
+            return;
+        }
+
+        if (cur_update.mode != next_update.mode) {
+            return;
+        }
+
+        std::copy(
+            next_update.id.cbegin(), next_update.id.cend(),
+            std::back_inserter(cur_update.id)
+        );
+
+        Region merged_region{};
+        merged_region.extend(cur_update.region);
+        merged_region.extend(next_update.region);
+
+        // Create merged buffer with overlayed current intensities,
+        // current update and merged update
+        std::vector<Intensity> merged_buffer(
+            merged_region.width * merged_region.height
+        );
+
+        copy_rect(
+            /* source = */ this->current_intensity.data(),
+            /* source_region = */ merged_region,
+            /* source_width = */ epd_width,
+            /* dest = */ merged_buffer.data(),
+            /* dest_top = */ 0,
+            /* dest_left = */ 0,
+            /* dest_width = */ merged_region.width
+        );
+
+        copy_rect(
+            /* source = */ cur_update.buffer.data(),
+            /* source_region = */ Region{
+                0, 0,
+                cur_update.region.width, cur_update.region.height
+            },
+            /* source_width = */ cur_update.region.width,
+            /* dest = */ merged_buffer.data(),
+            /* dest_top = */ cur_update.region.top - merged_region.top,
+            /* dest_left = */ cur_update.region.left - merged_region.left,
+            /* dest_width = */ merged_region.width
+        );
+
+        copy_rect(
+            /* source = */ next_update.buffer.data(),
+            /* source_region = */ Region{
+                0, 0,
+                next_update.region.width, next_update.region.height
+            },
+            /* source_width = */ next_update.region.width,
+            /* dest = */ merged_buffer.data(),
+            /* dest_top = */ next_update.region.top - merged_region.top,
+            /* dest_left = */ next_update.region.left - merged_region.left,
+            /* dest_width = */ merged_region.width
+        );
+
+        cur_update.region = std::move(merged_region);
+        cur_update.buffer = std::move(merged_buffer);
+
+        this->pending_updates.pop();
     }
+}
 
-    Update& cur_update = this->generate_update;
-    const Update& next_update = this->pending_updates.front();
+void Display::crop_update(Update& update, const Region& target)
+{
+    std::vector<Intensity> cropped_buffer(target.width * target.height);
 
-    if (cur_update.mode != next_update.mode) {
-        return false;
-    }
-
-    std::copy(
-        next_update.id.cbegin(), next_update.id.cend(),
-        std::back_inserter(cur_update.id)
-    );
-
-    auto top = std::min(cur_update.region.top, next_update.region.top);
-    auto left = std::min(cur_update.region.left, next_update.region.left);
-    auto width = std::max(
-        cur_update.region.left + cur_update.region.width,
-        next_update.region.left + next_update.region.width
-    ) - left;
-    auto height = std::max(
-        cur_update.region.top + cur_update.region.height,
-        next_update.region.top + next_update.region.height
-    ) - top;
-
-    Region merged_region{top, left, width, height};
-
-    // Create merged buffer with overlayed current intensities,
-    // current update and merged update
-    std::vector<Intensity> merged_buffer(width * height);
+    Region relative_target = target;
+    relative_target.left -= update.region.left;
+    relative_target.top -= update.region.top;
 
     copy_rect(
-        /* source = */ this->current_intensity.data(),
-        /* source_region = */ merged_region,
-        /* source_width = */ epd_width,
-        /* dest = */ merged_buffer.data(),
+        /* source = */ update.buffer.data(),
+        /* source_region = */ relative_target,
+        /* source_width = */ update.region.width,
+        /* dest = */ cropped_buffer.data(),
         /* dest_top = */ 0,
         /* dest_left = */ 0,
-        /* dest_width = */ width
+        /* dest_width = */ target.width
     );
 
-    copy_rect(
-        /* source = */ cur_update.buffer.data(),
-        /* source_region = */ Region{
-            0, 0,
-            cur_update.region.width, cur_update.region.height
-        },
-        /* source_width = */ cur_update.region.width,
-        /* dest = */ merged_buffer.data(),
-        /* dest_top = */ cur_update.region.top - merged_region.top,
-        /* dest_left = */ cur_update.region.left - merged_region.left,
-        /* dest_width = */ merged_region.width
-    );
-
-    copy_rect(
-        /* source = */ next_update.buffer.data(),
-        /* source_region = */ Region{
-            0, 0,
-            next_update.region.width, next_update.region.height
-        },
-        /* source_width = */ next_update.region.width,
-        /* dest = */ merged_buffer.data(),
-        /* dest_top = */ next_update.region.top - merged_region.top,
-        /* dest_left = */ next_update.region.left - merged_region.left,
-        /* dest_width = */ merged_region.width
-    );
-
-    cur_update.region = std::move(merged_region);
-    cur_update.buffer = std::move(merged_buffer);
-
-    this->pending_updates.pop();
-    return true;
+    update.region = target;
+    update.buffer = std::move(cropped_buffer);
 }
 
-void Display::align_update()
+Region Display::align_region(Region region)
 {
     constexpr auto mask = buf_actual_depth - 1;
-    auto& update = this->generate_update;
 
-    if (
-        (update.region.width & mask) == 0
-        && (update.region.left & mask) == 0
-    ) {
-        return;
+    if ((region.width & mask) == 0 && (region.left & mask) == 0) {
+        return region;
     }
 
-    auto aligned_left = update.region.left & ~mask;
-    auto pad_left = update.region.left & mask;
-    auto new_width = (pad_left + update.region.width + mask) & ~mask;
-    auto pad_right = new_width - pad_left - update.region.width;
+    Region result = region;
 
-    std::vector<Intensity> new_buffer(update.region.height * new_width);
-
-    const Intensity* prev = this->current_intensity.data()
-        + update.region.top * epd_width
-        + aligned_left;
-
-    const Intensity* old_next = update.buffer.data();
-    Intensity* new_next = new_buffer.data();
-
-    for (std::size_t y = 0; y < update.region.height; ++y) {
-        for (std::size_t x = 0; x < pad_left; ++x) {
-            *new_next++ = *prev++;
-        }
-
-        for (std::size_t x = 0; x < update.region.width; ++x) {
-            *new_next++ = *old_next++;
-        }
-
-        prev += update.region.width;
-
-        for (std::size_t x = 0; x < pad_right; ++x) {
-            *new_next++ = *prev++;
-        }
-
-        prev += epd_width - new_width;
-    }
-
-    update.buffer = std::move(new_buffer);
-    update.region.left = aligned_left;
-    update.region.width = new_width;
+    result.left = region.left & ~mask;
+    auto pad_left = region.left & mask;
+    result.width = (pad_left + region.width + mask) & ~mask;
+    return result;
 }
 
-std::vector<bool> Display::check_consecutive()
+std::vector<bool> Display::check_consecutive(const Update& update)
 {
-    const auto& update = this->generate_update;
     const auto& region = update.region;
     std::vector<bool> result(region.height * region.width / buf_actual_depth);
 
@@ -675,10 +675,9 @@ std::vector<bool> Display::check_consecutive()
     return result;
 }
 
-void Display::generate_frames()
+void Display::generate_batch(Update& update)
 {
-    std::vector<bool> is_consecutive = this->check_consecutive();
-    auto& update = this->generate_update;
+    std::vector<bool> is_consecutive = this->check_consecutive(update);
 
     const auto& region = update.region;
     const Intensity* prev_base = this->current_intensity.data()
@@ -756,6 +755,104 @@ void Display::generate_frames()
 #endif // ENABLE_PERF_REPORT
     }
 
+    this->send_frames();
+}
+
+void Display::generate_immediate(Update& update)
+{
+    // Stores which “step” of the waveform each pixel is on
+    static std::array<std::array<std::size_t, epd_width>, epd_height> steps;
+    steps.fill({});
+
+    const auto& waveform = this->table.lookup(update.mode, this->temperature);
+    const auto step_count = waveform.size();
+
+    this->generate_buffer.reserve(1);
+    auto finished = false;
+
+    while (!finished) {
+        finished = true;
+
+        // Merge compatible updates
+        this->merge_updates(update);
+
+        // Prepare next frame and advance each pixel step
+        this->generate_buffer.clear();
+        this->generate_buffer.emplace_back(this->null_frame);
+
+#if ENABLE_PERF_REPORT
+        update.generate_times.emplace_back(chrono::steady_clock::now());
+#endif // ENABLE_PERF_REPORT
+
+        const auto aligned_region = this->align_region(update.region);
+        Region active_region{};
+
+        std::uint16_t* data = reinterpret_cast<std::uint16_t*>(
+            this->generate_buffer.back().data()
+                + (margin_top + aligned_region.top) * buf_stride
+                + (margin_left + aligned_region.left / buf_actual_depth)
+                * buf_depth
+        );
+
+        const Intensity* prev = this->current_intensity.data()
+            + update.region.top * epd_width + update.region.left;
+        const Intensity* next = update.buffer.data();
+
+        for (
+            std::size_t y = aligned_region.top;
+            y < aligned_region.top + aligned_region.height;
+            ++y
+        ) {
+            for (
+                std::size_t sx = aligned_region.left;
+                sx < aligned_region.left + aligned_region.width;
+                sx += buf_actual_depth
+            ) {
+                std::uint16_t phases = 0;
+
+                for (std::size_t x = sx; x < sx + buf_actual_depth; ++x) {
+                    phases <<= 2;
+
+                    if (update.region.contains(x, y)) {
+                        auto phase = Phase::Noop;
+
+                        if (steps[y][x] < step_count) {
+                            finished = false;
+                            phase = waveform[steps[y][x]][*prev][*next];
+                            active_region.extend(x, y);
+                            steps[y][x]++;
+                        }
+
+                        phases |= static_cast<std::uint8_t>(phase);
+                        next++;
+                        prev++;
+                    }
+
+                }
+
+                *data = phases;
+                data += 2;
+            }
+
+            prev += epd_width - update.region.width;
+            data += (
+                buf_stride
+                - (aligned_region.width / buf_actual_depth) * buf_depth
+            ) / sizeof(*data);
+        }
+
+        if (finished) {
+            break;
+        }
+
+        this->send_frames();
+        this->crop_update(update, active_region);
+        /* std::cout << "active: top " << update.region.top << " left " << update.region.left << " width " << update.region.width << " height " << update.region.height << '\n'; */
+    }
+}
+
+void Display::send_frames()
+{
 #ifndef DRY_RUN
     {
         std::unique_lock<std::mutex> lock(this->vsync_write_lock);
@@ -769,16 +866,11 @@ void Display::generate_frames()
     this->vsync_can_write = false;
     this->vsync_can_read = true;
     this->vsync_can_read_cv.notify_one();
-#else
-#ifdef ENABLE_PERF_REPORT
-    this->make_perf_record();
-#endif // ENABLE_PERF_REPORT
-#endif // DRY_RUN
+#endif
 }
 
-void Display::commit_update()
+void Display::commit_update(const Update& update)
 {
-    const auto& update = this->generate_update;
     const auto& region = update.region;
 
     Intensity* prev = this->current_intensity.data()

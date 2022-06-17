@@ -102,6 +102,7 @@ void do_update(Waved::Display &display, const swtfb::swtfb_update &s) {
 
   display.push_update(
     waveform,
+    /* immediate = */ false,
     region,
     buffer
   );

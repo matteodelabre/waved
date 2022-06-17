@@ -28,7 +28,7 @@ namespace Waved
 {
 
 /**
- * Interface for the display controller.
+ * Interface to the display controller.
  *
  * This class processes update regions and drives the display controller with
  * appropriate waveforms to display the wanted intensities. It assumes it has
@@ -66,8 +66,8 @@ public:
      * added to the queue using `push_update()` continuously from a background
      * thread. If no updates are received for `power_off_timeout` ticks, the
      * controller is switched off to save power. Calling `stop()` or destroying
-     * this object will stop the background threads and updates remaining
-     * in the queue will not be processed.
+     * this object will stop the background threads, discarding any remaining
+     * updates in the queue.
      */
     void start();
 
@@ -77,18 +77,21 @@ public:
     /**
      * Add an update to the queue.
      *
-     * @param mode Update mode to use (ID or kind).
+     * @param mode Update mode to use (by kind or by ID).
+     * @param immediate Whether to process this update in immediate mode.
      * @param region Coordinates of the region affected by the update.
      * @param buffer New values for the pixels in the updated region.
      * @return True if the update was pushed, false if it was deemed invalid.
      */
     bool push_update(
         ModeKind mode,
+        bool immediate,
         Region region,
         const std::vector<Intensity>& buffer
     );
     bool push_update(
         ModeID mode,
+        bool immediate,
         Region region,
         const std::vector<Intensity>& buffer
     );
@@ -136,7 +139,7 @@ private:
     // Time after which to switch the controller off if no updates are received
     static constexpr std::chrono::milliseconds power_off_timeout{3000};
 
-    // True if the display is powered on
+    // True if the display controller is powered on
     bool power_state = false;
 
     /** Turn the display controller on or off. */
@@ -155,7 +158,7 @@ private:
     /** Update the panel temperature reading, if needed. */
     void update_temperature();
 
-    // Structures used for communicating with the display controller
+    // Structures used for communicating metadata with the display controller
     fb_var_screeninfo var_info{};
     fb_fix_screeninfo fix_info{};
 
@@ -253,6 +256,9 @@ private:
         // Update mode
         ModeID mode;
 
+        // Whether to process this update in immediate mode or in batch mode
+        bool immediate;
+
         // Coordinates of the region affected by the update
         Region region{};
 
@@ -289,7 +295,7 @@ private:
     // Update for which frames are currently being generated
     Update generate_update;
 
-    // Buffer from which the vsync thread will read to send frames
+    // Buffer from which the vsync thread will read frames to send
     // to the display
     std::vector<Frame> vsync_buffer{};
 
@@ -319,39 +325,44 @@ private:
     /**
      * Remove the next update from the queue (or wait if queue is empty).
      *
-     * The new update is placed in `generate_update`.
-     *
-     * @return True if a new update is available, false if the generator
-     * thread should stop.
+     * @return Next update from the queue, or an empty optional if
+     * there will be no more updates.
      */
-    bool pop_update();
-
-    /**
-     * Try to merge the next update from the queue into the current update.
-     *
-     * Two updates can be merged if they bear the same update mode.
-     * This assumes that a lock on updates_lock is already held by
-     * the current thread.
-     *
-     * @return True if an update was merged into the current update,
-     * false otherwise.
-     */
-    bool merge_update();
-
-    /** Align the current update on a 8-pixel boundary on the X axis. */
-    void align_update();
+    std::optional<Update> pop_update();
 
     /** Scan update to find pixel transitions equal to their predecessor. */
-    std::vector<bool> check_consecutive();
+    std::vector<bool> check_consecutive(const Update& update);
 
-    /** Prepare phase frames for the current update. */
-    void generate_frames();
+    /**
+     * Try to merge upcoming updates from the queue into a given update.
+     *
+     * Two updates can be merged if they have the same update mode
+     * and same immediate flag value.
+     *
+     * @param cur_update Update to merge in.
+     */
+    void merge_updates(Update& cur_update);
+
+    /** Crop an update to the given region. */
+    void crop_update(Update& update, const Region& target);
+
+    /** Align a display region to lie on the byte boundary. */
+    Region align_region(Region region);
+
+    /** Prepare phase frames in batch for the current update and send them. */
+    void generate_batch(Update& update);
+
+    /** Prepare and immediately send phase frames for the current update. */
+    void generate_immediate(Update& update);
 
     /** Store a null frame at the given buffer location. */
     void reset_frame(std::size_t frame_index);
 
+    /** Send frames generated by the generator thread to the vsync thread. */
+    void send_frames();
+
     /** Update current_intensity status with the current update. */
-    void commit_update();
+    void commit_update(const Update& update);
 
     /** Thread that sends ready frames to the display controller via vsync. */
     std::thread vsync_thread;
