@@ -9,6 +9,7 @@
 
 #include "defs.hpp"
 #include "file_descriptor.hpp"
+#include "update.hpp"
 #include "waveform_table.hpp"
 #include <atomic>
 #include <optional>
@@ -86,13 +87,13 @@ public:
     bool push_update(
         ModeKind mode,
         bool immediate,
-        Region region,
+        UpdateRegion region,
         const std::vector<Intensity>& buffer
     );
     bool push_update(
         ModeID mode,
         bool immediate,
-        Region region,
+        UpdateRegion region,
         const std::vector<Intensity>& buffer
     );
 
@@ -241,44 +242,7 @@ private:
     // Buffer holding the current known intensity state of all display cells
     std::array<Intensity, epd_size> current_intensity{};
 
-    /** Identifier for an update being processed. */
-    using UpdateID = std::uint32_t;
-
     static UpdateID next_update_id;
-
-    /** Information about a display update being processed. */
-    struct Update
-    {
-        // List of IDs for this update. Usually contains just a single ID,
-        // but can contain more if several updates are merged together
-        std::vector<UpdateID> id;
-
-        // Update mode
-        ModeID mode;
-
-        // Whether to process this update in immediate mode or in batch mode
-        bool immediate;
-
-        // Coordinates of the region affected by the update
-        Region region{};
-
-        // Buffer containing the new intensities of the region
-        std::vector<Intensity> buffer;
-
-#ifdef ENABLE_PERF_REPORT
-        // Time of creation and addition to the update queue
-        std::chrono::steady_clock::time_point queue_time;
-
-        // Time of removal from the update queue
-        std::chrono::steady_clock::time_point dequeue_time;
-
-        // Frame generation start time and individual frame end times
-        std::vector<std::chrono::steady_clock::time_point> generate_times;
-
-        // Vsync start time and individual frame end times
-        std::vector<std::chrono::steady_clock::time_point> vsync_times;
-#endif // ENABLE_PERF_REPORT
-    };
 
     // Queue of pending updates
     std::queue<Update> pending_updates;
@@ -343,11 +307,8 @@ private:
      */
     void merge_updates(Update& cur_update);
 
-    /** Crop an update to the given region. */
-    void crop_update(Update& update, const Region& target);
-
     /** Align a display region to lie on the byte boundary. */
-    Region align_region(Region region);
+    UpdateRegion align_region(UpdateRegion region);
 
     /** Prepare phase frames in batch for the current update and send them. */
     void generate_batch(Update& update);

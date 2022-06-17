@@ -94,7 +94,7 @@ void do_update(Waved::Display &display, const swtfb::swtfb_update &s) {
   std::cerr << " flags " << flags << std::endl << std::endl;
 #endif
 
-  Waved::Region region;
+  Waved::UpdateRegion region;
   region.top = rect.top;
   region.left = rect.left;
   region.width = rect.width;

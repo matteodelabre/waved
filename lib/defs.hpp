@@ -57,27 +57,6 @@ using PhaseMatrix
  */
 using Waveform = std::vector<PhaseMatrix>;
 
-/** Rectangular region. */
-struct Region
-{
-    std::uint32_t top;
-    std::uint32_t left;
-    std::uint32_t width;
-    std::uint32_t height;
-
-    /** Extend this region to encompass another one. */
-    void extend(const Region& region);
-
-    /** Extend this region to encompass a point. */
-    void extend(std::uint32_t x, std::uint32_t y);
-
-    /** Check if this region contains another one. */
-    bool contains(const Region& region);
-
-    /** Check if this region contains a point. */
-    bool contains(std::uint32_t x, std::uint32_t y);
-};
-
 /**
  * Waveform types.
  *

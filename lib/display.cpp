@@ -30,26 +30,6 @@ namespace
 constexpr int fbioblank_off = FB_BLANK_POWERDOWN;
 constexpr int fbioblank_on = FB_BLANK_UNBLANK;
 
-void copy_rect(
-    const Waved::Intensity* source,
-    const Waved::Region& source_region,
-    std::uint32_t source_width,
-    Waved::Intensity* dest,
-    std::uint32_t dest_top,
-    std::uint32_t dest_left,
-    std::uint32_t dest_width
-)
-{
-    source += source_region.left + source_width * source_region.top;
-    dest += dest_left + dest_width * dest_top;
-
-    for (std::uint32_t y = 0; y < source_region.height; ++y) {
-        std::copy(source, source + source_region.width, dest);
-        source += source_width;
-        dest += dest_width;
-    }
-}
-
 #ifdef ENABLE_PERF_REPORT
 std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
 {
@@ -78,7 +58,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
 namespace Waved
 {
 
-Display::UpdateID Display::next_update_id = 0;
+UpdateID Display::next_update_id = 0;
 
 Display::Display(
     const char* framebuffer_path,
@@ -396,7 +376,7 @@ void Display::update_temperature()
 bool Display::push_update(
     ModeKind mode,
     bool immediate,
-    Region region,
+    UpdateRegion region,
     const std::vector<Intensity>& buffer
 )
 {
@@ -411,7 +391,7 @@ bool Display::push_update(
 bool Display::push_update(
     ModeID mode,
     bool immediate,
-    Region region,
+    UpdateRegion region,
     const std::vector<Intensity>& buffer
 )
 {
@@ -429,7 +409,7 @@ bool Display::push_update(
         trans_buffer[k] = buffer[i * region.width + j] & (intensity_values - 1);
     }
 
-    region = Region{
+    region = UpdateRegion{
         /* top = */ epd_height - region.left - region.width,
         /* left = */ epd_width - region.top - region.height,
         /* width = */ region.height,
@@ -485,8 +465,6 @@ void Display::process_update()
     if (maybe_update) {
         auto update = *maybe_update;
 
-        /* while (this->merge_update()); */
-
         if (update.immediate) {
             this->generate_immediate(update);
         } else {
@@ -497,7 +475,7 @@ void Display::process_update()
     }
 }
 
-std::optional<Display::Update> Display::pop_update()
+std::optional<Update> Display::pop_update()
 {
 #ifdef DRY_RUN
     if (this->pending_updates.empty()) {
@@ -530,95 +508,19 @@ void Display::merge_updates(Update& cur_update)
     while (!this->pending_updates.empty()) {
         Update& next_update = this->pending_updates.front();
 
-        if (cur_update.immediate != next_update.immediate) {
+        if (!cur_update.merge(
+            next_update,
+            this->current_intensity.data(),
+            epd_width
+        )) {
             return;
         }
-
-        if (cur_update.mode != next_update.mode) {
-            return;
-        }
-
-        std::copy(
-            next_update.id.cbegin(), next_update.id.cend(),
-            std::back_inserter(cur_update.id)
-        );
-
-        Region merged_region{};
-        merged_region.extend(cur_update.region);
-        merged_region.extend(next_update.region);
-
-        // Create merged buffer with overlayed current intensities,
-        // current update and merged update
-        std::vector<Intensity> merged_buffer(
-            merged_region.width * merged_region.height
-        );
-
-        copy_rect(
-            /* source = */ this->current_intensity.data(),
-            /* source_region = */ merged_region,
-            /* source_width = */ epd_width,
-            /* dest = */ merged_buffer.data(),
-            /* dest_top = */ 0,
-            /* dest_left = */ 0,
-            /* dest_width = */ merged_region.width
-        );
-
-        copy_rect(
-            /* source = */ cur_update.buffer.data(),
-            /* source_region = */ Region{
-                0, 0,
-                cur_update.region.width, cur_update.region.height
-            },
-            /* source_width = */ cur_update.region.width,
-            /* dest = */ merged_buffer.data(),
-            /* dest_top = */ cur_update.region.top - merged_region.top,
-            /* dest_left = */ cur_update.region.left - merged_region.left,
-            /* dest_width = */ merged_region.width
-        );
-
-        copy_rect(
-            /* source = */ next_update.buffer.data(),
-            /* source_region = */ Region{
-                0, 0,
-                next_update.region.width, next_update.region.height
-            },
-            /* source_width = */ next_update.region.width,
-            /* dest = */ merged_buffer.data(),
-            /* dest_top = */ next_update.region.top - merged_region.top,
-            /* dest_left = */ next_update.region.left - merged_region.left,
-            /* dest_width = */ merged_region.width
-        );
-
-        cur_update.region = std::move(merged_region);
-        cur_update.buffer = std::move(merged_buffer);
 
         this->pending_updates.pop();
     }
 }
 
-void Display::crop_update(Update& update, const Region& target)
-{
-    std::vector<Intensity> cropped_buffer(target.width * target.height);
-
-    Region relative_target = target;
-    relative_target.left -= update.region.left;
-    relative_target.top -= update.region.top;
-
-    copy_rect(
-        /* source = */ update.buffer.data(),
-        /* source_region = */ relative_target,
-        /* source_width = */ update.region.width,
-        /* dest = */ cropped_buffer.data(),
-        /* dest_top = */ 0,
-        /* dest_left = */ 0,
-        /* dest_width = */ target.width
-    );
-
-    update.region = target;
-    update.buffer = std::move(cropped_buffer);
-}
-
-Region Display::align_region(Region region)
+UpdateRegion Display::align_region(UpdateRegion region)
 {
     constexpr auto mask = buf_actual_depth - 1;
 
@@ -626,7 +528,7 @@ Region Display::align_region(Region region)
         return region;
     }
 
-    Region result = region;
+    UpdateRegion result = region;
 
     result.left = region.left & ~mask;
     auto pad_left = region.left & mask;
@@ -678,6 +580,8 @@ std::vector<bool> Display::check_consecutive(const Update& update)
 void Display::generate_batch(Update& update)
 {
     std::vector<bool> is_consecutive = this->check_consecutive(update);
+
+    /* this->merge_updates(update); */
 
     const auto& region = update.region;
     const Intensity* prev_base = this->current_intensity.data()
@@ -785,7 +689,7 @@ void Display::generate_immediate(Update& update)
 #endif // ENABLE_PERF_REPORT
 
         const auto aligned_region = this->align_region(update.region);
-        Region active_region{};
+        UpdateRegion active_region{};
 
         std::uint16_t* data = reinterpret_cast<std::uint16_t*>(
             this->generate_buffer.back().data()
@@ -846,7 +750,7 @@ void Display::generate_immediate(Update& update)
         }
 
         this->send_frames();
-        this->crop_update(update, active_region);
+        update.crop(active_region);
         /* std::cout << "active: top " << update.region.top << " left " << update.region.left << " width " << update.region.width << " height " << update.region.height << '\n'; */
     }
 }

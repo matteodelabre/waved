@@ -21,7 +21,7 @@ void do_init(Waved::Display& display)
     display.push_update(
         Waved::ModeKind::INIT,
         /* immediate = */ false,
-        Waved::Region{
+        Waved::UpdateRegion{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
@@ -47,7 +47,7 @@ void do_block_gradients(Waved::Display& display)
         display.push_update(
             mode,
             /* immediate = */ false,
-            Waved::Region{
+            Waved::UpdateRegion{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
@@ -79,7 +79,7 @@ void do_continuous_gradients(Waved::Display& display)
         display.push_update(
             mode,
             /* immediate = */ false,
-            Waved::Region{
+            Waved::UpdateRegion{
                 /* top = */ 136,
                 /* left = */ 200 + (mode - 1) * 150U,
                 /* width = */ block_size,
@@ -101,7 +101,7 @@ void do_all_diff(Waved::Display& display)
     display.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
-        Waved::Region{
+        Waved::UpdateRegion{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
@@ -122,7 +122,7 @@ void do_random(Waved::Display& display)
     display.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
-        Waved::Region{
+        Waved::UpdateRegion{
             /* top = */ 0, /* left = */ 0,
             /* width = */ 1404, /* height = */ 1872
         },
@@ -154,7 +154,7 @@ void do_spiral(Waved::Display& display)
         display.push_update(
             Waved::ModeKind::A2,
             /* immediate = */ true,
-            Waved::Region{
+            Waved::UpdateRegion{
                 /* top = */ y, /* left = */ x,
                 /* width = */ stencil, /* height = */ stencil
             },
@@ -261,7 +261,7 @@ void do_image(Waved::Display& display)
         display.push_update(
             mode,
             /* immediate = */ false,
-            Waved::Region{
+            Waved::UpdateRegion{
                 /* top = */ 0, /* left = */ 0,
                 /* width = */ 1404, /* height = */ 1872
             },

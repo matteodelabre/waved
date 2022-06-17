@@ -43,6 +43,7 @@ add_library(waved SHARED
     lib/defs.cpp
     lib/display.cpp
     lib/file_descriptor.cpp
+    lib/update.cpp
     lib/waveform_table.cpp
 )
 set_target_properties(waved PROPERTIES
