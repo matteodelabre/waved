@@ -133,10 +133,10 @@ void do_random(Waved::Display& display)
 void do_spiral(Waved::Display& display)
 {
     using namespace std::literals::chrono_literals;
-    int count = 500;
-    double resol = 20.;
-    double resol_scaling = 0.09;
-    int scale = 75;
+    int count = 700;
+    double resol = 4.;
+    double resol_scaling = 0.044;
+    int scale = 2;
 
     std::uint32_t stencil = 6;
     std::uint32_t width = 1404;
@@ -160,7 +160,7 @@ void do_spiral(Waved::Display& display)
             },
             buffer
         );
-        std::this_thread::sleep_for(10ms);
+        std::this_thread::sleep_for(5ms);
     }
 }
 
