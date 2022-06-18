@@ -296,12 +296,19 @@ void Display::stop()
     if (this->started) {
 #ifndef DRY_RUN
         // Wait for the current update to be processed then terminate
-        this->stopping_generator = true;
-        this->updates_cv.notify_one();
+        {
+            std::unique_lock<std::mutex> lock(this->updates_lock);
+            this->stopping_generator = true;
+            this->updates_cv.notify_one();
+        }
         this->generator_thread.join();
 
         // Terminate the vsync thread
-        this->stopping_vsync = true;
+        {
+            std::unique_lock<std::mutex> lock(this->vsync_read_lock);
+            this->stopping_vsync = true;
+            this->vsync_can_read_cv.notify_one();
+        }
         this->vsync_thread.join();
 
         if (this->framebuffer != nullptr) {
@@ -628,8 +635,8 @@ void Display::generate_batch(Update& update)
 
     // Target intensity values
     static IntensityArray next_intensity;
-    next_intensity = this->current_intensity;
-    update.apply(next_intensity.data(), epd_width);
+    this->next_intensity = this->current_intensity;
+    update.apply(this->next_intensity.data(), epd_width);
 
     std::vector<bool> is_consecutive = this->check_consecutive(update);
 
@@ -639,7 +646,7 @@ void Display::generate_batch(Update& update)
     const Intensity* prev_base = this->current_intensity.data()
         + region.top * epd_width
         + region.left;
-    const Intensity* next_base = next_intensity.data()
+    const Intensity* next_base = this->next_intensity.data()
         + region.top * epd_width
         + region.left;
 
@@ -712,7 +719,7 @@ void Display::generate_batch(Update& update)
     }
 
     this->send_frames();
-    this->current_intensity = next_intensity;
+    this->current_intensity = this->next_intensity;
 }
 
 void Display::generate_immediate(Update& update)
@@ -758,7 +765,7 @@ void Display::generate_immediate(Update& update)
 
         auto* step = this->waveform_steps.data() + start_offset;
         auto* prev = this->current_intensity.data() + start_offset;
-        const auto* next = next_intensity.data() + start_offset;
+        const auto* next = this->next_intensity.data() + start_offset;
 
         for (
             auto y = aligned_region.top;
@@ -787,7 +794,8 @@ void Display::generate_immediate(Update& update)
                             ++(*step);
 
                             if (*step == step_count) {
-                                // Pixel transition completed
+                                // Pixel transition completed: reset to allow
+                                // further transitions, and commit final value
                                 *step = 0;
                                 *prev = *next;
                             }
