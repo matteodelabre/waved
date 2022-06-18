@@ -239,10 +239,17 @@ private:
         = buf_height - margin_top - margin_bottom;
     static constexpr std::uint32_t epd_size = epd_width * epd_height;
 
-    using IntensityArray = std::array<Intensity, epd_size>;
+    using IntensityArray = std::vector<Intensity>;
+    using StepArray = std::vector<std::size_t>;
 
-    // Buffer holding the current known intensity state of all display cells
-    IntensityArray current_intensity{};
+    // Buffer holding the current known values of all pixels
+    IntensityArray current_intensity;
+
+    // Buffer holding the target pixel values during an update
+    IntensityArray next_intensity;
+
+    // Tells the current waveform “step” of each pixel during immediate updates
+    StepArray waveform_steps;
 
     static UpdateID next_update_id;
 
@@ -299,13 +306,8 @@ private:
     /** Scan update to find pixel transitions equal to their predecessor. */
     std::vector<bool> check_consecutive(const Update& update);
 
-    /**
-     * Try to merge upcoming updates from the queue into a given update.
-     *
-     * @param cur_update Update to merge into.
-     * @param intensity Intensity buffer to merge into.
-     */
-    void merge_updates(Update& cur_update, IntensityArray& intensity);
+    /** Try to merge upcoming updates from the queue into a given update. */
+    void merge_updates(Update& cur_update);
 
     /** Align a display region to lie on the byte boundary. */
     UpdateRegion align_region(UpdateRegion region);

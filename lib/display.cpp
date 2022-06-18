@@ -68,6 +68,9 @@ Display::Display(
 : table(std::move(waveform_table))
 , framebuffer_fd(framebuffer_path, O_RDWR)
 , temp_sensor_fd(temperature_sensor_path, O_RDONLY)
+, current_intensity(epd_size)
+, next_intensity(epd_size)
+, waveform_steps(epd_size)
 {}
 
 auto Display::discover_framebuffer() -> std::optional<std::string>
@@ -499,18 +502,65 @@ std::optional<Update> Display::pop_update()
     return {std::move(update)};
 }
 
-void Display::merge_updates(Update& cur_update, IntensityArray& intensity)
+void Display::merge_updates(Update& cur_update)
 {
     std::lock_guard<std::mutex> lock(this->updates_lock);
 
     while (!this->pending_updates.empty()) {
         Update& next_update = this->pending_updates.front();
 
-        if (!cur_update.merge(next_update)) {
+        // Check that update modes are compatible
+        if (
+            cur_update.immediate != next_update.immediate
+            && cur_update.mode != next_update.mode
+        ) {
             return;
         }
 
-        next_update.apply(intensity.data(), epd_width);
+        auto merged_region = cur_update.region;
+        merged_region.extend(next_update.region);
+
+        if (cur_update.immediate) {
+            // Check that the merged update does not change the target value
+            // of a pixel which is currently in a transition
+            auto start_offset =
+                next_update.region.top * epd_width + next_update.region.left;
+            auto mid_offset = epd_width - next_update.region.width;
+
+            auto* step = this->waveform_steps.data() + start_offset;
+            const auto* cand = this->next_intensity.data() + start_offset;
+            const auto* next = next_update.buffer.data();
+
+            for (
+                auto y = next_update.region.top;
+                y < next_update.region.top + next_update.region.height;
+                ++y
+            ) {
+                for (
+                    auto x = next_update.region.left;
+                    x < next_update.region.left + next_update.region.width;
+                    ++x
+                ) {
+                    if (*cand != *next && *step > 0) {
+                        return;
+                    }
+                }
+
+                step += mid_offset;
+                cand += mid_offset;
+            }
+        }
+
+        // Merge update data
+        next_update.apply(this->next_intensity.data(), epd_width);
+
+        // Merge metadata
+        cur_update.region = merged_region;
+        std::copy(
+            next_update.id.cbegin(), next_update.id.cend(),
+            std::back_inserter(cur_update.id)
+        );
+
         this->pending_updates.pop();
     }
 }
@@ -668,25 +718,22 @@ void Display::generate_batch(Update& update)
 void Display::generate_immediate(Update& update)
 {
     const auto& waveform = this->table.lookup(update.mode, this->temperature);
+
     const auto step_count = waveform.size();
+    std::fill(this->waveform_steps.begin(), this->waveform_steps.end(), 0);
 
-    // Tells which “step” of the waveform each pixel is on
-    static std::array<std::array<std::size_t, epd_width>, epd_height> steps;
-    steps.fill({});
-
-    // Target intensity values
-    static IntensityArray next_intensity;
-    next_intensity = this->current_intensity;
-    update.apply(next_intensity.data(), epd_width);
+    this->next_intensity = this->current_intensity;
+    update.apply(this->next_intensity.data(), epd_width);
 
     this->generate_buffer.reserve(1);
+
     auto finished = false;
 
     while (!finished) {
         finished = true;
 
         // Merge compatible updates
-        this->merge_updates(update, next_intensity);
+        this->merge_updates(update);
 
         // Prepare next frame and advance each pixel step
         this->generate_buffer.clear();
@@ -706,49 +753,60 @@ void Display::generate_immediate(Update& update)
                 * buf_depth
         );
 
-        const Intensity* prev = this->current_intensity.data()
-            + update.region.top * epd_width + update.region.left;
-        const Intensity* next = next_intensity.data()
-            + update.region.top * epd_width + update.region.left;
+        auto start_offset = update.region.top * epd_width + update.region.left;
+        auto mid_offset = epd_width - update.region.width;
+
+        auto* step = this->waveform_steps.data() + start_offset;
+        auto* prev = this->current_intensity.data() + start_offset;
+        const auto* next = next_intensity.data() + start_offset;
 
         for (
-            std::size_t y = aligned_region.top;
+            auto y = aligned_region.top;
             y < aligned_region.top + aligned_region.height;
             ++y
         ) {
             for (
-                std::size_t sx = aligned_region.left;
+                auto sx = aligned_region.left;
                 sx < aligned_region.left + aligned_region.width;
                 sx += buf_actual_depth
             ) {
                 std::uint16_t phases = 0;
 
-                for (std::size_t x = sx; x < sx + buf_actual_depth; ++x) {
+                for (auto x = sx; x < sx + buf_actual_depth; ++x) {
                     phases <<= 2;
 
                     if (update.region.contains(x, y)) {
                         auto phase = Phase::Noop;
 
-                        if (steps[y][x] < step_count) {
+                        if (*prev != *next) {
                             finished = false;
-                            phase = waveform[steps[y][x]][*prev][*next];
+
+                            // Advance pixel to next step
+                            phase = waveform[*step][*prev][*next];
                             active_region.extend(x, y);
-                            steps[y][x]++;
+                            ++(*step);
+
+                            if (*step == step_count) {
+                                // Pixel transition completed
+                                *step = 0;
+                                *prev = *next;
+                            }
                         }
 
                         phases |= static_cast<std::uint8_t>(phase);
-                        next++;
-                        prev++;
+                        ++step;
+                        ++next;
+                        ++prev;
                     }
-
                 }
 
                 *data = phases;
                 data += 2;
             }
 
-            prev += epd_width - update.region.width;
-            next += epd_width - update.region.width;
+            step += mid_offset;
+            prev += mid_offset;
+            next += mid_offset;
             data += (
                 buf_stride
                 - (aligned_region.width / buf_actual_depth) * buf_depth
@@ -761,10 +819,7 @@ void Display::generate_immediate(Update& update)
 
         this->send_frames();
         update.region = active_region;
-        /* std::cout << "active: top " << update.region.top << " left " << update.region.left << " width " << update.region.width << " height " << update.region.height << '\n'; */
     }
-
-    this->current_intensity = next_intensity;
 }
 
 void Display::send_frames()
@@ -775,13 +830,21 @@ void Display::send_frames()
         this->vsync_can_write_cv.wait(lock, [this] {
             return this->vsync_can_write || this->stopping_generator;
         });
+
+        if (this->stopping_generator) {
+            return;
+        }
+
         this->vsync_update = this->generate_update;
         std::swap(this->generate_buffer, this->vsync_buffer);
     }
 
-    this->vsync_can_write = false;
-    this->vsync_can_read = true;
-    this->vsync_can_read_cv.notify_one();
+    {
+        std::unique_lock<std::mutex> lock(this->vsync_read_lock);
+        this->vsync_can_write = false;
+        this->vsync_can_read = true;
+        this->vsync_can_read_cv.notify_one();
+    }
 #endif
 }
 
@@ -858,9 +921,12 @@ void Display::run_vsync_thread()
         this->make_perf_record();
 #endif // ENABLE_PERF_REPORT
 
-        this->vsync_can_write = true;
-        this->vsync_can_read = false;
-        this->vsync_can_write_cv.notify_one();
+        {
+            std::unique_lock<std::mutex> lock(this->vsync_write_lock);
+            this->vsync_can_write = true;
+            this->vsync_can_read = false;
+            this->vsync_can_write_cv.notify_one();
+        }
     }
 #endif // DRY_RUN
 }

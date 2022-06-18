@@ -69,23 +69,6 @@ struct Update
     // Buffer containing the target intensities of the region
     std::vector<Intensity> buffer;
 
-    /** Copy the update data to an intensity buffer. */
-    void apply(Intensity* target, std::uint32_t target_width);
-
-    /**
-     * Try to merge another update into this update.
-     *
-     * Two updates can be merged if they have the same update mode
-     * and immediate flag value, and have non-conflicting contents.
-     *
-     * @param update Update to merge.
-     * @returns True if the merge succeeded, false otherwise.
-     */
-    bool merge(Update& update);
-
-    /** Crop this update to a given rectangle. */
-    void crop(const UpdateRegion& target);
-
 #ifdef ENABLE_PERF_REPORT
     // Time of addition to the update queue
     std::chrono::steady_clock::time_point queue_time;
@@ -99,6 +82,9 @@ struct Update
     // Vsync start time and individual frame end times
     std::vector<std::chrono::steady_clock::time_point> vsync_times;
 #endif // ENABLE_PERF_REPORT
+
+    /** Copy the update buffer to a destination buffer. */
+    void apply(Intensity* target, std::uint32_t target_width);
 };
 
 } // namespace Waved
