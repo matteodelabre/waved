@@ -588,67 +588,23 @@ UpdateRegion Display::align_region(UpdateRegion region)
     return result;
 }
 
-std::vector<bool> Display::check_consecutive(const Update& update)
-{
-    const auto& region = update.region;
-    std::vector<bool> result(region.height * region.width / buf_actual_depth);
-
-    const Intensity* prev_base = this->current_intensity.data()
-        + region.top * epd_width
-        + region.left;
-    const Intensity* next_base = update.buffer.data();
-
-    const Intensity* prev = prev_base;
-    const Intensity* next = next_base;
-
-    bool first = true;
-    std::array<Intensity, buf_actual_depth> last_prevs;
-    std::array<Intensity, buf_actual_depth> last_nexts;
-    std::size_t i = 0;
-
-    for (std::size_t y = 0; y < region.height; ++y) {
-        for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {
-            result[i] = (
-                !first
-                && std::equal(last_prevs.cbegin(), last_prevs.cend(), prev)
-                && std::equal(last_nexts.cbegin(), last_nexts.cend(), next)
-            );
-
-            first = false;
-            std::copy(prev, prev + buf_actual_depth, last_prevs.begin());
-            std::copy(next, next + buf_actual_depth, last_nexts.begin());
-
-            prev += buf_actual_depth;
-            next += buf_actual_depth;
-            ++i;
-        }
-
-        prev += epd_width - region.width;
-    }
-
-    return result;
-}
-
 void Display::generate_batch(Update& update)
 {
     const auto& waveform = this->table.lookup(update.mode, this->temperature);
 
-    // Target intensity values
-    static IntensityArray next_intensity;
     this->next_intensity = this->current_intensity;
     update.apply(this->next_intensity.data(), epd_width);
 
-    std::vector<bool> is_consecutive = this->check_consecutive(update);
+    // Merge compatible updates
+    this->merge_updates(update);
 
-    /* this->merge_updates(update); */
+    const auto aligned_region = this->align_region(update.region);
 
-    const auto& region = update.region;
-    const Intensity* prev_base = this->current_intensity.data()
-        + region.top * epd_width
-        + region.left;
-    const Intensity* next_base = this->next_intensity.data()
-        + region.top * epd_width
-        + region.left;
+    auto start_offset = update.region.top * epd_width + update.region.left;
+    auto mid_offset = epd_width - update.region.width;
+
+    const auto* prev_base = this->current_intensity.data() + start_offset;
+    const auto* next_base = this->next_intensity.data() + start_offset;
 
 #if ENABLE_PERF_REPORT
     update.generate_times.resize(waveform.size() + 1);
@@ -660,57 +616,55 @@ void Display::generate_batch(Update& update)
 
     for (std::size_t k = 0; k < waveform.size(); ++k) {
         this->generate_buffer.emplace_back(this->null_frame);
-        std::uint8_t* data = this->generate_buffer.back().data()
-            + (margin_top + region.top) * buf_stride
-            + (margin_left + region.left / buf_actual_depth) * buf_depth;
+
+        std::uint16_t* data = reinterpret_cast<std::uint16_t*>(
+            this->generate_buffer.back().data()
+                + (margin_top + aligned_region.top) * buf_stride
+                + (margin_left + aligned_region.left / buf_actual_depth)
+                * buf_depth
+        );
 
         const auto& matrix = waveform[k];
-        const Intensity* prev = prev_base;
-        const Intensity* next = next_base;
+        const auto* prev = prev_base;
+        const auto* next = next_base;
 
         std::size_t i = 0;
-        std::uint8_t byte1 = 0;
-        std::uint8_t byte2 = 0;
+        std::uint16_t phases = 0;
 
-        for (std::size_t y = 0; y < region.height; ++y) {
-            for (std::size_t x = 0; x < region.width / buf_actual_depth; ++x) {
-                if (!is_consecutive[i]) {
-                    auto phase1 = matrix[*prev++][*next++];
-                    auto phase2 = matrix[*prev++][*next++];
-                    auto phase3 = matrix[*prev++][*next++];
-                    auto phase4 = matrix[*prev++][*next++];
-                    auto phase5 = matrix[*prev++][*next++];
-                    auto phase6 = matrix[*prev++][*next++];
-                    auto phase7 = matrix[*prev++][*next++];
-                    auto phase8 = matrix[*prev++][*next++];
+        for (
+            auto y = aligned_region.top;
+            y < aligned_region.top + aligned_region.height;
+            ++y
+        ) {
+            for (
+                auto sx = aligned_region.left;
+                sx < aligned_region.left + aligned_region.width;
+                sx += buf_actual_depth
+            ) {
+                std::uint16_t phases = 0;
 
-                    byte1 = (
-                        (static_cast<std::uint8_t>(phase5) << 6)
-                        | (static_cast<std::uint8_t>(phase6) << 4)
-                        | (static_cast<std::uint8_t>(phase7) << 2)
-                        | static_cast<std::uint8_t>(phase8)
-                    );
+                for (auto x = sx; x < sx + buf_actual_depth; ++x) {
+                    phases <<= 2;
 
-                    byte2 = (
-                        (static_cast<std::uint8_t>(phase1) << 6)
-                        | (static_cast<std::uint8_t>(phase2) << 4)
-                        | (static_cast<std::uint8_t>(phase3) << 2)
-                        | static_cast<std::uint8_t>(phase4)
-                    );
-                } else {
-                    prev += buf_actual_depth;
-                    next += buf_actual_depth;
+                    if (update.region.contains(x, y)) {
+                        auto phase = matrix[*prev][*next];
+                        phases |= static_cast<std::uint8_t>(phase);
+                        ++prev;
+                        ++next;
+                    }
                 }
 
-                *data++ = byte1;
-                *data++ = byte2;
+                *data = phases;
                 data += 2;
                 ++i;
             }
 
-            prev += epd_width - region.width;
-            next += epd_width - region.width;
-            data += buf_stride - (region.width / buf_actual_depth) * buf_depth;
+            prev += mid_offset;
+            next += mid_offset;
+            data += (
+                buf_stride
+                - (aligned_region.width / buf_actual_depth) * buf_depth
+            ) / sizeof(*data);
         }
 
 #ifdef ENABLE_PERF_REPORT
