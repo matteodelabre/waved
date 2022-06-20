@@ -519,7 +519,7 @@ void Display::merge_updates(Update& cur_update)
         // Check that update modes are compatible
         if (
             cur_update.immediate != next_update.immediate
-            && cur_update.mode != next_update.mode
+            || cur_update.mode != next_update.mode
         ) {
             return;
         }
