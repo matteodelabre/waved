@@ -30,50 +30,32 @@ void do_init(Waved::Display& display)
     display.wait_for(update);
 }
 
-void do_block_gradients(Waved::Display& display)
+void do_gradients(Waved::Display& display)
 {
-    constexpr std::size_t block_size = 100;
+    constexpr std::size_t width = 50;
+    constexpr std::size_t block_height = 100;
     constexpr std::size_t block_count = 16;
-    std::vector<Waved::Intensity> buffer(block_size * block_size * block_count);
+    constexpr std::size_t resol = 5;
+
+    std::vector<Waved::Intensity> block_buffer(
+        width * block_height * block_count
+    );
+    std::vector<Waved::Intensity> continuous_buffer(
+        width * block_height * block_count
+    );
 
     for (std::size_t i = 0; i < block_count; ++i) {
         std::fill(
-            buffer.begin() + block_size * block_size * i,
-            buffer.begin() + block_size * block_size * (i + 1),
+            block_buffer.begin() + width * block_height * i,
+            block_buffer.begin() + width * block_height * (i + 1),
             static_cast<Waved::Intensity>(i * 2)
         );
     }
 
-    Waved::UpdateID last_update = 0;
-
-    for (Waved::ModeID mode = 1; mode < 8; ++mode) {
-        last_update = display.push_update(
-            mode,
-            /* immediate = */ false,
-            Waved::UpdateRegion{
-                /* top = */ 136,
-                /* left = */ 200 + (mode - 1) * 150U,
-                /* width = */ block_size,
-                /* height = */ block_size * block_count
-            },
-            buffer
-        ).value();
-    }
-
-    display.wait_for(last_update);
-}
-
-void do_continuous_gradients(Waved::Display& display)
-{
-    constexpr std::size_t block_size = 100;
-    constexpr std::size_t block_count = 16;
-    constexpr std::size_t resol = 5;
-    std::vector<Waved::Intensity> buffer(block_size * block_size * block_count);
-
-    for (std::size_t i = 0; i < block_size * block_count; ++i) {
+    for (std::size_t i = 0; i < block_height * block_count; ++i) {
         std::fill(
-            buffer.begin() + block_size * i,
-            buffer.begin() + block_size * (i + 1),
+            continuous_buffer.begin() + width * i,
+            continuous_buffer.begin() + width * (i + 1),
             (i / 16 / resol) % 2 == 0
                 ? static_cast<Waved::Intensity>(((i / resol) % 16) * 2)
                 : static_cast<Waved::Intensity>(30 - ((i / resol) % 16) * 2)
@@ -83,16 +65,27 @@ void do_continuous_gradients(Waved::Display& display)
     Waved::UpdateID last_update = 0;
 
     for (Waved::ModeID mode = 1; mode < 8; ++mode) {
+        display.push_update(
+            mode,
+            /* immediate = */ false,
+            Waved::UpdateRegion{
+                /* top = */ 136U,
+                /* left = */ 127U + (mode - 1) * 175U,
+                /* width = */ width,
+                /* height = */ block_height * block_count
+            },
+            block_buffer
+        );
         last_update = display.push_update(
             mode,
             /* immediate = */ false,
             Waved::UpdateRegion{
-                /* top = */ 136,
-                /* left = */ 200 + (mode - 1) * 150U,
-                /* width = */ block_size,
-                /* height = */ block_size * block_count
+                /* top = */ 136U,
+                /* left = */ 127U + 50U + (mode - 1) * 175U,
+                /* width = */ width,
+                /* height = */ block_height * block_count
             },
-            buffer
+            continuous_buffer
         ).value();
     }
 
@@ -362,13 +355,9 @@ int main(int argc, const char** argv)
 
     display.start();
 
-    std::cerr << "[test] Block gradients\n";
+    std::cerr << "[test] Gradients\n";
     do_init(display);
-    do_block_gradients(display);
-
-    std::cerr << "[test] Continuous gradients\n";
-    do_init(display);
-    do_continuous_gradients(display);
+    do_gradients(display);
 
     std::cerr << "[test] Image\n";
     do_init(display);
