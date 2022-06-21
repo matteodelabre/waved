@@ -90,6 +90,11 @@ Update::Update(
 , buffer(std::move(buffer))
 {}
 
+const std::vector<UpdateID>& Update::get_id() const
+{
+    return this->id;
+}
+
 ModeID Update::get_mode() const
 {
     return this->mode;

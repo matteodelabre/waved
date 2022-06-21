@@ -358,7 +358,7 @@ void Display::update_temperature()
     this->temperature_last_read = chrono::steady_clock::now();
 }
 
-bool Display::push_update(
+std::optional<UpdateID> Display::push_update(
     ModeKind mode,
     bool immediate,
     UpdateRegion region,
@@ -373,7 +373,7 @@ bool Display::push_update(
     );
 }
 
-bool Display::push_update(
+std::optional<UpdateID> Display::push_update(
     ModeID mode,
     bool immediate,
     UpdateRegion region,
@@ -381,7 +381,7 @@ bool Display::push_update(
 )
 {
     if (buffer.size() != region.width * region.height) {
-        return false;
+        return {};
     }
 
     // Transform from reMarkable coordinates to EPD coordinates:
@@ -407,27 +407,51 @@ bool Display::push_update(
         || region.left + region.width > epd_width
         || region.top + region.height > epd_height
     ) {
-        return false;
+        return {};
+    }
+
+    Update update(mode, immediate, region, std::move(trans_buffer));
+    auto id = update.get_id().back();
+
+    {
+        std::lock_guard<std::mutex> lock(this->processing_lock);
+        this->processing_updates.emplace(id);
     }
 
 #ifndef DRY_RUN
-    std::lock_guard<std::mutex> lock(this->updates_lock);
-#endif // DRY_RUN
+    {
+        std::lock_guard<std::mutex> lock(this->updates_lock);
+#endif
 
-    this->pending_updates.emplace(
-        mode,
-        immediate,
-        region,
-        std::move(trans_buffer)
-    );
-    this->pending_updates.back().record_enqueue();
+        this->pending_updates.emplace(std::move(update));
+        this->pending_updates.back().record_enqueue();
 
 #ifndef DRY_RUN
-    this->updates_cv.notify_one();
-#else
+        this->updates_cv.notify_one();
+    }
+#endif
+
+#ifdef DRY_RUN
     this->process_update();
-#endif // DRY_RUN
-    return true;
+#endif
+
+    return {id};
+}
+
+void Display::wait_for(UpdateID id)
+{
+    std::unique_lock<std::mutex> lock(this->processing_lock);
+    this->processed_cv.wait(lock, [this, id] {
+        return this->processing_updates.count(id) == 0;
+    });
+}
+
+void Display::wait_for_all()
+{
+    std::unique_lock<std::mutex> lock(this->processing_lock);
+    this->processed_cv.wait(lock, [this] {
+        return this->processing_updates.size() == 0;
+    });
 }
 
 void Display::run_generator_thread()
@@ -845,6 +869,16 @@ void Display::run_vsync_thread()
             this->vsync_update.dump_perf_record(this->perf_report);
         }
 #endif
+
+        if (this->vsync_finalize) {
+            std::unique_lock<std::mutex> lock(this->processing_lock);
+
+            for (const auto id : this->vsync_update.get_id()) {
+                this->processing_updates.erase(id);
+            }
+
+            this->processed_cv.notify_one();
+        }
 
         {
             std::unique_lock<std::mutex> lock(this->vsync_write_lock);

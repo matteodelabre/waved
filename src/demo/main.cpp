@@ -18,7 +18,7 @@
 
 void do_init(Waved::Display& display)
 {
-    display.push_update(
+    auto update = display.push_update(
         Waved::ModeKind::INIT,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -26,7 +26,8 @@ void do_init(Waved::Display& display)
             /* width = */ 1404, /* height = */ 1872
         },
         std::vector<Waved::Intensity>(1404 * 1872, 30)
-    );
+    ).value();
+    display.wait_for(update);
 }
 
 void do_block_gradients(Waved::Display& display)
@@ -43,8 +44,10 @@ void do_block_gradients(Waved::Display& display)
         );
     }
 
+    Waved::UpdateID last_update = 0;
+
     for (Waved::ModeID mode = 1; mode < 8; ++mode) {
-        display.push_update(
+        last_update = display.push_update(
             mode,
             /* immediate = */ false,
             Waved::UpdateRegion{
@@ -54,8 +57,10 @@ void do_block_gradients(Waved::Display& display)
                 /* height = */ block_size * block_count
             },
             buffer
-        );
+        ).value();
     }
+
+    display.wait_for(last_update);
 }
 
 void do_continuous_gradients(Waved::Display& display)
@@ -75,8 +80,10 @@ void do_continuous_gradients(Waved::Display& display)
         );
     }
 
+    Waved::UpdateID last_update = 0;
+
     for (Waved::ModeID mode = 1; mode < 8; ++mode) {
-        display.push_update(
+        last_update = display.push_update(
             mode,
             /* immediate = */ false,
             Waved::UpdateRegion{
@@ -86,8 +93,10 @@ void do_continuous_gradients(Waved::Display& display)
                 /* height = */ block_size * block_count
             },
             buffer
-        );
+        ).value();
     }
+
+    display.wait_for(last_update);
 }
 
 void do_all_diff(Waved::Display& display)
@@ -98,7 +107,7 @@ void do_all_diff(Waved::Display& display)
         buffer[i] = (i % 16) * 2;
     }
 
-    display.push_update(
+    auto update = display.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -106,7 +115,8 @@ void do_all_diff(Waved::Display& display)
             /* width = */ 1404, /* height = */ 1872
         },
         buffer
-    );
+    ).value();
+    display.wait_for(update);
 }
 
 void do_random(Waved::Display& display)
@@ -119,7 +129,7 @@ void do_random(Waved::Display& display)
         buffer[i] = distrib(generator) * 2;
     }
 
-    display.push_update(
+    auto update = display.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -127,7 +137,8 @@ void do_random(Waved::Display& display)
             /* width = */ 1404, /* height = */ 1872
         },
         buffer
-    );
+    ).value();
+    display.wait_for(update);
 }
 
 void do_spiral(Waved::Display& display)
@@ -143,6 +154,7 @@ void do_spiral(Waved::Display& display)
     std::uint32_t height = 1872;
 
     std::vector<Waved::Intensity> buffer(stencil * stencil, 0);
+    Waved::UpdateID last_update = 0;
 
     for (int i = 0; i < count; ++i) {
         auto t = i / (resol + i * resol_scaling);
@@ -151,7 +163,7 @@ void do_spiral(Waved::Display& display)
         std::uint32_t x = width / 2 + std::round(std::cos(t) * ampl * scale);
         std::uint32_t y = height / 2 - std::round(std::sin(t) * ampl * scale);
 
-        display.push_update(
+        last_update = display.push_update(
             Waved::ModeKind::A2,
             /* immediate = */ true,
             Waved::UpdateRegion{
@@ -159,9 +171,11 @@ void do_spiral(Waved::Display& display)
                 /* width = */ stencil, /* height = */ stencil
             },
             buffer
-        );
+        ).value();
         std::this_thread::sleep_for(5ms);
     }
+
+    display.wait_for(last_update);
 }
 
 void do_image(Waved::Display& display)
@@ -257,23 +271,16 @@ void do_image(Waved::Display& display)
         }
     }
 
-    for (Waved::ModeID mode = 1; mode < 8; ++mode) {
-        display.push_update(
-            mode,
-            /* immediate = */ false,
-            Waved::UpdateRegion{
-                /* top = */ 0, /* left = */ 0,
-                /* width = */ 1404, /* height = */ 1872
-            },
-            buffer
-        );
-
-        if (mode < 7) {
-            using namespace std::literals::chrono_literals;
-            std::this_thread::sleep_for(5s);
-            do_init(display);
-        }
-    }
+    auto update = display.push_update(
+        Waved::ModeKind::GC16,
+        /* immediate = */ false,
+        Waved::UpdateRegion{
+            /* top = */ 0, /* left = */ 0,
+            /* width = */ 1404, /* height = */ 1872
+        },
+        buffer
+    ).value();
+    display.wait_for(update);
 }
 
 void print_help(std::ostream& out, const char* name)
@@ -355,39 +362,31 @@ int main(int argc, const char** argv)
 
     display.start();
 
-    /* std::cerr << "[test] Block gradients\n"; */
-    /* do_init(display); */
-    /* do_block_gradients(display); */
-    /* std::this_thread::sleep_for(15s); */
+    std::cerr << "[test] Block gradients\n";
+    do_init(display);
+    do_block_gradients(display);
 
-    /* std::cerr << "[test] Continuous gradients\n"; */
-    /* do_init(display); */
-    /* do_continuous_gradients(display); */
-    /* std::this_thread::sleep_for(15s); */
+    std::cerr << "[test] Continuous gradients\n";
+    do_init(display);
+    do_continuous_gradients(display);
 
-    /* std::cerr << "[test] Image\n"; */
-    /* do_init(display); */
-    /* do_image(display); */
-    /* std::this_thread::sleep_for(5s); */
+    std::cerr << "[test] Image\n";
+    do_init(display);
+    do_image(display);
 
-    /* std::cerr << "[test] All different values\n"; */
-    /* do_init(display); */
-    /* do_all_diff(display); */
-    /* std::this_thread::sleep_for(15s); */
+    std::cerr << "[test] All different values\n";
+    do_init(display);
+    do_all_diff(display);
 
-    /* std::cerr << "[test] Random values\n"; */
-    /* do_init(display); */
-    /* do_random(display); */
-    /* std::this_thread::sleep_for(15s); */
+    std::cerr << "[test] Random values\n";
+    do_init(display);
+    do_random(display);
 
     std::cerr << "[test] Spiral\n";
     do_init(display);
-    std::this_thread::sleep_for(9s);
     do_spiral(display);
-    std::this_thread::sleep_for(5s);
 
-    std::cerr << "[test] End\n";
-    std::this_thread::sleep_for(3s);
+    display.wait_for_all();
 
 #ifdef ENABLE_PERF_REPORT
     if (perf_report_out) {

@@ -23,6 +23,7 @@
 #include <sstream>
 #include <cstdint>
 #include <vector>
+#include <set>
 #include <linux/fb.h>
 
 namespace Waved
@@ -82,20 +83,27 @@ public:
      * @param immediate Whether to process this update in immediate mode.
      * @param region Coordinates of the region affected by the update.
      * @param buffer New values for the pixels in the updated region.
-     * @return True if the update was pushed, false if it was deemed invalid.
+     * @return If the update was accepted, unique update ID that can be used
+     * to track its completion.
      */
-    bool push_update(
+    std::optional<UpdateID> push_update(
         ModeKind mode,
         bool immediate,
         UpdateRegion region,
         const std::vector<Intensity>& buffer
     );
-    bool push_update(
+    std::optional<UpdateID> push_update(
         ModeID mode,
         bool immediate,
         UpdateRegion region,
         const std::vector<Intensity>& buffer
     );
+
+    /** Block until an update is complete. */
+    void wait_for(UpdateID id);
+
+    /** Block until all updates are complete. */
+    void wait_for_all();
 
     /**
      * Get the performance report for past updates as a CSV string.
@@ -249,10 +257,15 @@ private:
     // Tells the current waveform “step” of each pixel during immediate updates
     StepArray waveform_steps;
 
-    // Queue of pending updates
+    // Queue of updates waiting to be processed
     std::queue<Update> pending_updates;
     std::condition_variable updates_cv;
     std::mutex updates_lock;
+
+    // Set of updates currently being processed or in queue
+    std::set<UpdateID> processing_updates;
+    std::condition_variable processed_cv;
+    std::mutex processing_lock;
 
     // Frame that leaves cell intensities unchanged
     Frame null_frame{};

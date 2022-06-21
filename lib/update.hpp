@@ -65,6 +65,8 @@ public:
         std::vector<Intensity> buffer
     );
 
+    const std::vector<UpdateID>& get_id() const;
+
     ModeID get_mode() const;
 
     bool get_immediate() const;
