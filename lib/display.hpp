@@ -316,7 +316,7 @@ private:
     void merge_updates();
 
     /** Align a display region to lie on the byte boundary. */
-    UpdateRegion align_region(UpdateRegion region);
+    UpdateRegion align_region(UpdateRegion region) const;
 
     /** Prepare phase frames in batch for the current update and send them. */
     void generate_batch();

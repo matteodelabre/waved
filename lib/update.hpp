@@ -34,15 +34,6 @@ struct Region
 
     /** Extend this region to encompass a point. */
     void extend(Coordinate x, Coordinate y);
-
-    /** Intersect this region with another one. */
-    void intersect(const Region<Coordinate>& region);
-
-    /** Check if this region contains another one. */
-    bool contains(const Region<Coordinate>& region) const;
-
-    /** Check if this region contains a point. */
-    bool contains(Coordinate x, Coordinate y) const;
 };
 
 using UpdateRegion = Region<std::uint32_t>;

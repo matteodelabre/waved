@@ -549,7 +549,7 @@ void Display::merge_updates()
     }
 }
 
-UpdateRegion Display::align_region(UpdateRegion region)
+UpdateRegion Display::align_region(UpdateRegion region) const
 {
     constexpr auto mask = buf_actual_depth - 1;
 
@@ -567,7 +567,7 @@ UpdateRegion Display::align_region(UpdateRegion region)
 
 void Display::generate_batch()
 {
-    Update& update = this->generator_update;
+    auto& update = this->generator_update;
     const auto& waveform = this->table.lookup(
         update.get_mode(),
         this->temperature
@@ -575,15 +575,13 @@ void Display::generate_batch()
 
     this->next_intensity = this->current_intensity;
     update.apply(this->next_intensity.data(), epd_width);
-
-    // Merge compatible updates
     this->merge_updates();
 
     const auto& region = update.get_region();
     const auto aligned_region = this->align_region(region);
 
-    auto start_offset = region.top * epd_width + region.left;
-    auto mid_offset = epd_width - region.width;
+    auto start_offset = aligned_region.top * epd_width + aligned_region.left;
+    auto mid_offset = epd_width - aligned_region.width;
 
     const auto* prev_base = this->current_intensity.data() + start_offset;
     const auto* next_base = this->next_intensity.data() + start_offset;
@@ -606,9 +604,6 @@ void Display::generate_batch()
         const auto* prev = prev_base;
         const auto* next = next_base;
 
-        std::size_t i = 0;
-        std::uint16_t phases = 0;
-
         for (
             auto y = aligned_region.top;
             y < aligned_region.top + aligned_region.height;
@@ -623,18 +618,14 @@ void Display::generate_batch()
 
                 for (auto x = sx; x < sx + buf_actual_depth; ++x) {
                     phases <<= 2;
-
-                    if (region.contains(x, y)) {
-                        auto phase = matrix[*prev][*next];
-                        phases |= static_cast<std::uint8_t>(phase);
-                        ++prev;
-                        ++next;
-                    }
+                    auto phase = matrix[*prev][*next];
+                    phases |= static_cast<std::uint8_t>(phase);
+                    ++prev;
+                    ++next;
                 }
 
                 *data = phases;
                 data += 2;
-                ++i;
             }
 
             prev += mid_offset;
@@ -692,8 +683,8 @@ void Display::generate_immediate()
                 * buf_depth
         );
 
-        auto start_offset = region.top * epd_width + region.left;
-        auto mid_offset = epd_width - region.width;
+        auto start_offset = aligned_region.top * epd_width + aligned_region.left;
+        auto mid_offset = epd_width - aligned_region.width;
 
         auto* step = this->waveform_steps.data() + start_offset;
         auto* prev = this->current_intensity.data() + start_offset;
@@ -714,30 +705,28 @@ void Display::generate_immediate()
                 for (auto x = sx; x < sx + buf_actual_depth; ++x) {
                     phases <<= 2;
 
-                    if (region.contains(x, y)) {
-                        auto phase = Phase::Noop;
+                    auto phase = Phase::Noop;
 
-                        if (*prev != *next) {
-                            finished = false;
+                    if (*prev != *next) {
+                        finished = false;
 
-                            // Advance pixel to next step
-                            phase = waveform[*step][*prev][*next];
-                            active_region.extend(x, y);
-                            ++(*step);
+                        // Advance pixel to next step
+                        phase = waveform[*step][*prev][*next];
+                        active_region.extend(x, y);
+                        ++(*step);
 
-                            if (*step == step_count) {
-                                // Pixel transition completed: reset to allow
-                                // further transitions, and commit final value
-                                *step = 0;
-                                *prev = *next;
-                            }
+                        if (*step == step_count) {
+                            // Pixel transition completed: reset to allow
+                            // further transitions, and commit final value
+                            *step = 0;
+                            *prev = *next;
                         }
-
-                        phases |= static_cast<std::uint8_t>(phase);
-                        ++step;
-                        ++next;
-                        ++prev;
                     }
+
+                    phases |= static_cast<std::uint8_t>(phase);
+                    ++step;
+                    ++next;
+                    ++prev;
                 }
 
                 *data = phases;
