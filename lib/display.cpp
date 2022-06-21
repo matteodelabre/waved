@@ -30,35 +30,10 @@ namespace
 constexpr int fbioblank_off = FB_BLANK_POWERDOWN;
 constexpr int fbioblank_on = FB_BLANK_UNBLANK;
 
-#ifdef ENABLE_PERF_REPORT
-std::ostream& operator<<(std::ostream& out, chrono::steady_clock::time_point t)
-{
-    out << chrono::duration_cast<chrono::microseconds>(t.time_since_epoch())
-        .count();
-    return out;
-}
-#endif // ENABLE_PERF_REPORT
-
-template<typename Elem>
-std::ostream& operator<<(std::ostream& out, const std::vector<Elem>& ts)
-{
-    for (auto it = ts.cbegin(); it != ts.cend(); ++it) {
-        out << *it;
-
-        if (std::next(it) != ts.cend()) {
-            out << ':';
-        }
-    }
-
-    return out;
-}
-
 }
 
 namespace Waved
 {
-
-UpdateID Display::next_update_id = 0;
 
 Display::Display(
     const char* framebuffer_path,
@@ -439,19 +414,13 @@ bool Display::push_update(
     std::lock_guard<std::mutex> lock(this->updates_lock);
 #endif // DRY_RUN
 
-    this->pending_updates.emplace(Update{
-        {this->next_update_id++}
-        , mode
-        , immediate
-        , region
-        , std::move(trans_buffer)
-#ifdef ENABLE_PERF_REPORT
-        , /* queue_time = */ chrono::steady_clock::now()
-        , /* dequeue_time = */ chrono::steady_clock::now()
-        , /* generate_times = */ {}
-        , /* vsync_times = */ {}
-#endif // ENABLE_PERF_REPORT
-    });
+    this->pending_updates.emplace(
+        mode,
+        immediate,
+        region,
+        std::move(trans_buffer)
+    );
+    this->pending_updates.back().record_enqueue();
 
 #ifndef DRY_RUN
     this->updates_cv.notify_one();
@@ -464,21 +433,16 @@ bool Display::push_update(
 void Display::run_generator_thread()
 {
     while (!this->stopping_generator) {
-        this->process_update();
-    }
-}
+        auto maybe_update = this->pop_update();
 
-void Display::process_update()
-{
-    auto maybe_update = this->pop_update();
+        if (maybe_update) {
+            this->generator_update = std::move(*maybe_update);
 
-    if (maybe_update) {
-        auto update = *maybe_update;
-
-        if (update.immediate) {
-            this->generate_immediate(update);
-        } else {
-            this->generate_batch(update);
+            if (this->generator_update.get_immediate()) {
+                this->generate_immediate();
+            } else {
+                this->generate_batch();
+            }
         }
     }
 }
@@ -502,15 +466,13 @@ std::optional<Update> Display::pop_update()
 
     auto update = std::move(this->pending_updates.front());
     this->pending_updates.pop();
-
-#ifdef ENABLE_PERF_REPORT
-    this->generate_update.dequeue_time = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
+    update.record_dequeue();
     return {std::move(update)};
 }
 
-void Display::merge_updates(Update& cur_update)
+void Display::merge_updates()
 {
+    Update& cur_update = this->generator_update;
     std::lock_guard<std::mutex> lock(this->updates_lock);
 
     while (!this->pending_updates.empty()) {
@@ -518,34 +480,31 @@ void Display::merge_updates(Update& cur_update)
 
         // Check that update modes are compatible
         if (
-            cur_update.immediate != next_update.immediate
-            || cur_update.mode != next_update.mode
+            cur_update.get_immediate() != next_update.get_immediate()
+            || cur_update.get_mode() != next_update.get_mode()
         ) {
             return;
         }
 
-        auto merged_region = cur_update.region;
-        merged_region.extend(next_update.region);
-
-        if (cur_update.immediate) {
+        if (cur_update.get_immediate()) {
             // Check that the merged update does not change the target value
             // of a pixel which is currently in a transition
-            auto start_offset =
-                next_update.region.top * epd_width + next_update.region.left;
-            auto mid_offset = epd_width - next_update.region.width;
+            auto next_region = next_update.get_region();
+            auto start_offset = next_region.top * epd_width + next_region.left;
+            auto mid_offset = epd_width - next_region.width;
 
             auto* step = this->waveform_steps.data() + start_offset;
             const auto* cand = this->next_intensity.data() + start_offset;
-            const auto* next = next_update.buffer.data();
+            const auto* next = next_update.get_buffer().data();
 
             for (
-                auto y = next_update.region.top;
-                y < next_update.region.top + next_update.region.height;
+                auto y = next_region.top;
+                y < next_region.top + next_region.height;
                 ++y
             ) {
                 for (
-                    auto x = next_update.region.left;
-                    x < next_update.region.left + next_update.region.width;
+                    auto x = next_region.left;
+                    x < next_region.left + next_region.width;
                     ++x
                 ) {
                     if (*cand != *next && *step > 0) {
@@ -558,16 +517,10 @@ void Display::merge_updates(Update& cur_update)
             }
         }
 
-        // Merge update data
+        // Merge updates
         next_update.apply(this->next_intensity.data(), epd_width);
-
-        // Merge metadata
-        cur_update.region = merged_region;
-        std::copy(
-            next_update.id.cbegin(), next_update.id.cend(),
-            std::back_inserter(cur_update.id)
-        );
-
+        cur_update.merge_with(next_update);
+        cur_update.record_dequeue();
         this->pending_updates.pop();
     }
 }
@@ -588,33 +541,34 @@ UpdateRegion Display::align_region(UpdateRegion region)
     return result;
 }
 
-void Display::generate_batch(Update& update)
+void Display::generate_batch()
 {
-    const auto& waveform = this->table.lookup(update.mode, this->temperature);
+    Update& update = this->generator_update;
+    const auto& waveform = this->table.lookup(
+        update.get_mode(),
+        this->temperature
+    );
 
     this->next_intensity = this->current_intensity;
     update.apply(this->next_intensity.data(), epd_width);
 
     // Merge compatible updates
-    this->merge_updates(update);
+    this->merge_updates();
 
-    const auto aligned_region = this->align_region(update.region);
+    const auto& region = update.get_region();
+    const auto aligned_region = this->align_region(region);
 
-    auto start_offset = update.region.top * epd_width + update.region.left;
-    auto mid_offset = epd_width - update.region.width;
+    auto start_offset = region.top * epd_width + region.left;
+    auto mid_offset = epd_width - region.width;
 
     const auto* prev_base = this->current_intensity.data() + start_offset;
     const auto* next_base = this->next_intensity.data() + start_offset;
-
-#if ENABLE_PERF_REPORT
-    update.generate_times.resize(waveform.size() + 1);
-    update.generate_times[0] = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
 
     this->generate_buffer.clear();
     this->generate_buffer.reserve(waveform.size());
 
     for (std::size_t k = 0; k < waveform.size(); ++k) {
+        update.record_generate_start();
         this->generate_buffer.emplace_back(this->null_frame);
 
         std::uint16_t* data = reinterpret_cast<std::uint16_t*>(
@@ -646,7 +600,7 @@ void Display::generate_batch(Update& update)
                 for (auto x = sx; x < sx + buf_actual_depth; ++x) {
                     phases <<= 2;
 
-                    if (update.region.contains(x, y)) {
+                    if (region.contains(x, y)) {
                         auto phase = matrix[*prev][*next];
                         phases |= static_cast<std::uint8_t>(phase);
                         ++prev;
@@ -667,18 +621,20 @@ void Display::generate_batch(Update& update)
             ) / sizeof(*data);
         }
 
-#ifdef ENABLE_PERF_REPORT
-        update.generate_times[k + 1] = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
+        update.record_generate_end();
     }
 
-    this->send_frames();
+    this->send_frames(/* finalize = */ true);
     this->current_intensity = this->next_intensity;
 }
 
-void Display::generate_immediate(Update& update)
+void Display::generate_immediate()
 {
-    const auto& waveform = this->table.lookup(update.mode, this->temperature);
+    Update& update = this->generator_update;
+    const auto& waveform = this->table.lookup(
+        update.get_mode(),
+        this->temperature
+    );
 
     const auto step_count = waveform.size();
     std::fill(this->waveform_steps.begin(), this->waveform_steps.end(), 0);
@@ -694,17 +650,15 @@ void Display::generate_immediate(Update& update)
         finished = true;
 
         // Merge compatible updates
-        this->merge_updates(update);
+        this->merge_updates();
+        update.record_generate_start();
 
         // Prepare next frame and advance each pixel step
         this->generate_buffer.clear();
         this->generate_buffer.emplace_back(this->null_frame);
 
-#if ENABLE_PERF_REPORT
-        update.generate_times.emplace_back(chrono::steady_clock::now());
-#endif // ENABLE_PERF_REPORT
-
-        const auto aligned_region = this->align_region(update.region);
+        const auto& region = update.get_region();
+        const auto aligned_region = this->align_region(region);
         UpdateRegion active_region{};
 
         std::uint16_t* data = reinterpret_cast<std::uint16_t*>(
@@ -714,8 +668,8 @@ void Display::generate_immediate(Update& update)
                 * buf_depth
         );
 
-        auto start_offset = update.region.top * epd_width + update.region.left;
-        auto mid_offset = epd_width - update.region.width;
+        auto start_offset = region.top * epd_width + region.left;
+        auto mid_offset = epd_width - region.width;
 
         auto* step = this->waveform_steps.data() + start_offset;
         auto* prev = this->current_intensity.data() + start_offset;
@@ -736,7 +690,7 @@ void Display::generate_immediate(Update& update)
                 for (auto x = sx; x < sx + buf_actual_depth; ++x) {
                     phases <<= 2;
 
-                    if (update.region.contains(x, y)) {
+                    if (region.contains(x, y)) {
                         auto phase = Phase::Noop;
 
                         if (*prev != *next) {
@@ -775,16 +729,13 @@ void Display::generate_immediate(Update& update)
             ) / sizeof(*data);
         }
 
-        if (finished) {
-            break;
-        }
-
-        this->send_frames();
-        update.region = active_region;
+        update.record_generate_end();
+        this->send_frames(finished);
+        update.set_region(active_region);
     }
 }
 
-void Display::send_frames()
+void Display::send_frames(bool finalize)
 {
 #ifndef DRY_RUN
     {
@@ -797,7 +748,13 @@ void Display::send_frames()
             return;
         }
 
-        this->vsync_update = this->generate_update;
+        if (finalize) {
+            this->vsync_update = std::move(this->generator_update);
+            this->vsync_finalize = true;
+        } else {
+            this->vsync_finalize = false;
+        }
+
         std::swap(this->generate_buffer, this->vsync_buffer);
     }
 
@@ -824,7 +781,9 @@ void Display::run_vsync_thread()
                 return this->vsync_can_read || this->stopping_vsync;
             };
 
-            if (!this->vsync_can_read_cv.wait_for(lock, power_off_timeout, pred)) {
+            if (!this->vsync_can_read_cv.wait_for(
+                lock, power_off_timeout, pred
+            )) {
                 // Turn off power to save battery when no updates are coming
                 this->set_power(false);
                 this->vsync_can_read_cv.wait(lock, pred);
@@ -835,17 +794,17 @@ void Display::run_vsync_thread()
             return;
         }
 
-#if ENABLE_PERF_REPORT
-        Update& update = this->vsync_update;
-        update.vsync_times.resize(this->vsync_buffer.size() + 1);
-        update.vsync_times[0] = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
-
         this->set_power(true);
         this->update_temperature();
 
         for (std::size_t k = 0; k < this->vsync_buffer.size(); ++k) {
             next_frame = (next_frame + 1) % 2;
+
+            if (this->vsync_finalize) {
+                this->vsync_update.record_vsync_start();
+            } else {
+                this->generator_update.record_vsync_start();
+            }
 
             std::memcpy(
                 this->framebuffer + next_frame * buf_frame,
@@ -872,16 +831,20 @@ void Display::run_vsync_thread()
                 return;
             }
 
-            first_frame = false;
+            if (this->vsync_finalize) {
+                this->vsync_update.record_vsync_end();
+            } else {
+                this->generator_update.record_vsync_end();
+            }
 
-#ifdef ENABLE_PERF_REPORT
-            update.vsync_times[k + 1] = chrono::steady_clock::now();
-#endif // ENABLE_PERF_REPORT
+            first_frame = false;
         }
 
 #ifdef ENABLE_PERF_REPORT
-        this->make_perf_record();
-#endif // ENABLE_PERF_REPORT
+        if (this->vsync_finalize) {
+            this->vsync_update.dump_perf_record(this->perf_report);
+        }
+#endif
 
         {
             std::unique_lock<std::mutex> lock(this->vsync_write_lock);
@@ -904,39 +867,18 @@ void Display::reset_frame(std::size_t frame_index)
 #endif // DRY_RUN
 }
 
-#ifdef ENABLE_PERF_REPORT
-void Display::make_perf_record()
-{
-#ifdef DRY_RUN
-    const auto& update = this->generate_update;
-    this->perf_report << update.id << ','
-        << static_cast<int>(update.mode) << ','
-        << update.region.width << ','
-        << update.region.height << ','
-        << update.queue_time << ','
-        << update.dequeue_time << ','
-        << update.generate_times << ",\n";
-#else
-    const auto& update = this->vsync_update;
-    this->perf_report << update.id << ','
-        << static_cast<int>(update.mode) << ','
-        << update.region.width << ','
-        << update.region.height << ','
-        << update.queue_time << ','
-        << update.dequeue_time << ','
-        << update.generate_times << ','
-        << update.vsync_times << '\n';
-#endif // DRY_RUN
-}
-
 std::string Display::get_perf_report() const
 {
+#ifdef ENABLE_PERF_REPORT
     return (
-        "id,mode,width,height,queue_time,dequeue_time,"
-        "generate_times,vsync_times\n"
+        "id,mode,immediate,width,height,enqueue_times,dequeue_times,"
+        "generate_start_times,generate_end_times,vsync_start_times,"
+        "vsync_end_times\n"
         + this->perf_report.str()
     );
+#else
+    return "";
+#endif
 }
-#endif // ENABLE_PERF_REPORT
 
 } // namespace Waved

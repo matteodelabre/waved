@@ -84,7 +84,8 @@ void Region<Coordinate>::intersect(const Region<Coordinate>& region)
 }
 
 template<typename Coordinate>
-auto Region<Coordinate>::contains(const Region<Coordinate>& region) -> bool
+auto Region<Coordinate>::contains(const Region<Coordinate>& region) const
+-> bool
 {
     return (
         this->left <= region.left
@@ -95,7 +96,7 @@ auto Region<Coordinate>::contains(const Region<Coordinate>& region) -> bool
 }
 
 template<typename Coordinate>
-auto Region<Coordinate>::contains(Coordinate x, Coordinate y) -> bool
+auto Region<Coordinate>::contains(Coordinate x, Coordinate y) const -> bool
 {
     return this->contains(Region{
         /* top = */ y,

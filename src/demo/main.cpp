@@ -382,12 +382,11 @@ int main(int argc, const char** argv)
 
     std::cerr << "[test] Spiral\n";
     do_init(display);
-    std::this_thread::sleep_for(4s);
+    std::this_thread::sleep_for(9s);
     do_spiral(display);
     std::this_thread::sleep_for(5s);
 
     std::cerr << "[test] End\n";
-    do_init(display);
     std::this_thread::sleep_for(3s);
 
 #ifdef ENABLE_PERF_REPORT
