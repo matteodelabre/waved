@@ -285,9 +285,7 @@ void print_help(std::ostream& out, const char* name)
 #endif
     out << "Run waved tests.\n";
 #ifdef ENABLE_PERF_REPORT
-    out << "Dump performance report in PERF_OUT (in CSV format).\n";
-#else
-    out << "Performance reports disabled at compile time.\n";
+    out << "Dump a performance report to PERF_OUT (in CSV format).\n";
 #endif
 }
 
@@ -305,17 +303,8 @@ int main(int argc, const char** argv)
 
     if (argc && (argv[0] == std::string("-h") || argv[0] == std::string("--help"))) {
         print_help(std::cout, name);
-        return 0;
+        return EXIT_SUCCESS;
     }
-
-#ifdef ENABLE_PERF_REPORT
-    std::ofstream perf_report_out;
-
-    if (argc) {
-        perf_report_out.open(argv[0]);
-        next_arg(argc, argv);
-    }
-#endif
 
     auto wbf_path = Waved::WaveformTable::discover_wbf_file();
 
@@ -353,6 +342,16 @@ int main(int argc, const char** argv)
         std::move(table),
     };
 
+#ifdef ENABLE_PERF_REPORT
+    std::ofstream perf_report_out;
+
+    if (argc) {
+        perf_report_out.open(argv[0]);
+        next_arg(argc, argv);
+        display.enable_perf_report(perf_report_out);
+    }
+#endif
+
     display.start();
 
     std::cerr << "[test] Gradients\n";
@@ -376,12 +375,5 @@ int main(int argc, const char** argv)
     do_spiral(display);
 
     display.wait_for_all();
-
-#ifdef ENABLE_PERF_REPORT
-    if (perf_report_out) {
-        perf_report_out << display.get_perf_report();
-    }
-#endif
-
     return 0;
 }

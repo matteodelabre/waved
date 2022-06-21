@@ -854,8 +854,8 @@ void Display::run_vsync_thread()
         }
 
 #ifdef ENABLE_PERF_REPORT
-        if (this->vsync_finalize) {
-            this->vsync_update.dump_perf_record(this->perf_report);
+        if (this->vsync_finalize && this->perf_report_stream != nullptr) {
+            this->vsync_update.dump_perf_record(*this->perf_report_stream);
         }
 #endif
 
@@ -890,17 +890,20 @@ void Display::reset_frame(std::size_t frame_index)
 #endif // DRY_RUN
 }
 
-std::string Display::get_perf_report() const
+void Display::enable_perf_report(std::ostream& out)
 {
 #ifdef ENABLE_PERF_REPORT
-    return (
-        "id,mode,immediate,width,height,enqueue_times,dequeue_times,"
+    this->perf_report_stream = &out;
+    out << "id,mode,immediate,width,height,enqueue_times,dequeue_times,"
         "generate_start_times,generate_end_times,vsync_start_times,"
-        "vsync_end_times\n"
-        + this->perf_report.str()
-    );
-#else
-    return "";
+        "vsync_end_times\n";
+#endif
+}
+
+void Display::disable_perf_report()
+{
+#ifdef ENABLE_PERF_REPORT
+    this->perf_report_stream = nullptr;
 #endif
 }
 

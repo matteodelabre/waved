@@ -2,7 +2,8 @@ import csv
 
 
 def parse_list(map_fun, field):
-    return list(map(map_fun, field.split(":")))
+    filtered = filter(lambda x: x, field.split(":"))
+    return list(map(map_fun, filtered))
 
 
 def parse_updates_csv(in_file):

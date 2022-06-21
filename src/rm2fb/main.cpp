@@ -1,5 +1,6 @@
 #include "display.hpp"
 #include "ipc.cpp"
+#include <fstream>
 #include <semaphore.h> // sem_open
 
 #define DEBUG
@@ -59,8 +60,35 @@ void do_update(Waved::Display &display, const swtfb::swtfb_update &s)
     display.push_update(mode, immediate, region, buffer);
 }
 
-int main(int, const char**)
+void print_help(std::ostream& out, const char* name)
 {
+#ifdef ENABLE_PERF_REPORT
+    out << "Usage: " << name << " [-h|--help] [PERF_OUT]\n";
+#else
+    out << "Usage: " << name << " [-h|--help]\n";
+#endif
+    out << "Run an rm2fb server using waved.\n";
+#ifdef ENABLE_PERF_REPORT
+    out << "Dump a performance report to PERF_OUT (in CSV format).\n";
+#endif
+}
+
+inline void next_arg(int& argc, const char**& argv)
+{
+    --argc;
+    ++argv;
+}
+
+int main(int argc, const char** argv)
+{
+    const char* name = argv[0];
+    next_arg(argc, argv);
+
+    if (argc && (argv[0] == std::string("-h") || argv[0] == std::string("--help"))) {
+        print_help(std::cout, name);
+        return EXIT_SUCCESS;
+    }
+
     auto wbf_path = Waved::WaveformTable::discover_wbf_file();
 
     if (!wbf_path) {
@@ -96,6 +124,16 @@ int main(int, const char**)
         sensor_path->data(),
         std::move(table),
     };
+
+#ifdef ENABLE_PERF_REPORT
+    std::ofstream perf_report_out;
+
+    if (argc) {
+        perf_report_out.open(argv[0]);
+        next_arg(argc, argv);
+        display.enable_perf_report(perf_report_out);
+    }
+#endif
 
     display.start();
 

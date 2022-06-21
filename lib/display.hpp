@@ -20,7 +20,6 @@
 #include <chrono>
 #include <thread>
 #include <cstdlib>
-#include <sstream>
 #include <cstdint>
 #include <vector>
 #include <set>
@@ -106,10 +105,15 @@ public:
     void wait_for_all();
 
     /**
-     * Get the performance report for past updates as a CSV string.
+     * Enable performance reporting to the given stream.
+     *
+     * This method is a no-op unless ENABLE_PERF_REPORT is set at compile time.
+     * When enabled, a CSV document is written to the given stream with
+     * information on when each update enters or leaves the queue and when
+     * frames are generated and sent to the display.
      *
      * The CSV document will contain one row per processed update (or batch of
-     * updates merged together), with the following information:
+     * updates), with the following information:
      *
      * ids - Unique IDs of updates in this batch
      * mode - Update mode used
@@ -123,8 +127,13 @@ public:
      *
      * Fields that contain a variable number of values (ids, generate_times,
      * and vsync_times) are colon-separated.
+     *
+     * @param out Stream to write performance data to.
      */
-    std::string get_perf_report() const;
+    void enable_perf_report(std::ostream& out);
+
+    /** Disable performance reporting. */
+    void disable_perf_report();
 
 private:
     // Display-specific waveform information
@@ -297,7 +306,7 @@ private:
     std::mutex vsync_write_lock;
 
 #ifdef ENABLE_PERF_REPORT
-    std::ostringstream perf_report;
+    std::ostream* perf_report_stream = nullptr;
 #endif
 
     /** Thread that processes update requests and generates frames. */
