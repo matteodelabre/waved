@@ -1,23 +1,28 @@
 import csv
 
 
+def parse_list(map_fun, field):
+    return list(map(map_fun, field.split(":")))
+
+
 def parse_updates_csv(in_file):
     reader = csv.DictReader(in_file, delimiter=",")
     updates = list(reader)
 
     for update in updates:
+        update["id"] = parse_list(str, update["id"])
+        update["immediate"] = bool(int(update["immediate"]))
         update["width"] = int(update["width"])
         update["height"] = int(update["height"])
-        update["queue_time"] = int(update["queue_time"])
-        update["dequeue_time"] = int(update["dequeue_time"])
-        update["generate_times"] = \
-            list(map(int, update["generate_times"].split(":"))) \
-            if update["generate_times"] else []
-        update["vsync_times"] = \
-            list(map(int, update["vsync_times"].split(":"))) \
-            if update["vsync_times"] else []
-        update["start"] = update["queue_time"]
-        update["end"] = update["vsync_times"][-1] \
-            if update["vsync_times"] else update["generate_times"][-1]
+        update["enqueue_times"] = parse_list(int, update["enqueue_times"])
+        update["dequeue_times"] = parse_list(int, update["dequeue_times"])
+        update["generate_start_times"] = \
+            parse_list(int, update["generate_start_times"])
+        update["generate_end_times"] = \
+            parse_list(int, update["generate_end_times"])
+        update["vsync_start_times"] = \
+            parse_list(int, update["vsync_start_times"])
+        update["vsync_end_times"] = \
+            parse_list(int, update["vsync_end_times"])
 
     return updates
