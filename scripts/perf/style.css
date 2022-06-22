@@ -1,0 +1,108 @@
+body, html, .timeline {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+input {
+    vertical-align: middle;
+}
+
+.timeline-container {
+    overflow: auto;
+    width: 100%;
+    height: 100%;
+}
+
+.timeline {
+    position: relative;
+}
+
+.timeline-tick {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    height: 100%;
+    width: 2px;
+    background: #bbb;
+}
+
+.timeline-row {
+    position: relative;
+    height: 20px;
+    width: 100%;
+}
+
+.timeline-row:nth-child(2n) {
+    background: #f0f0f0;
+}
+
+.timeline-row:nth-child(2n + 1) {
+    background: #ddd;
+}
+
+.update-queue-item {
+    --height: 2px;
+    position: absolute;
+    z-index: 2;
+    background: #333;
+    height: var(--height);
+    top: calc(50% - var(--height) / 2);
+}
+
+.update-queue-item::before, .update-queue-item::after {
+    content: "";
+    display: block;
+    position: absolute;
+    --size: 10px;
+    width: var(--size);
+    height: var(--size);
+    border-radius: var(--size);
+    border: 2px solid #333;
+    top: calc(var(--height) / 2 - var(--size) / 2);
+}
+
+.update-queue-item::before {
+    left: calc(-1 * var(--size) / 2);
+    background: #ddd;
+    z-index: 3;
+}
+
+.update-queue-item::after {
+    right: calc(-1 * var(--size) / 2);
+    background: #888;
+    z-index: 2;
+}
+
+.update-generate-item, .update-vsync-item {
+    height: 50%;
+    top: 25%;
+    position: absolute;
+    z-index: 2;
+}
+
+.update-generate-item:nth-child(2n) {
+    background: #22aa22;
+}
+
+.update-generate-item:nth-child(2n + 1) {
+    background: #55dd55;
+}
+
+.update-vsync-item:nth-child(2n) {
+    background: #5555dd;
+}
+
+.update-vsync-item:nth-child(2n + 1) {
+    background: #2222aa;
+}
