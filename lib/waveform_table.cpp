@@ -26,8 +26,8 @@ auto WaveformTable::lookup(ModeID mode, int temperature) const
 {
     if (mode < 0 || mode >= this->mode_count) {
         std::ostringstream message;
-        message << "Mode " << mode << " not supported, available modes "
-            "are 0-" << (this->mode_count - 1);
+        message << "Mode ID " << static_cast<int>(mode) << " not supported, "
+            "available modes are 0-" << (this->mode_count - 1);
         throw std::out_of_range(message.str());
     }
 

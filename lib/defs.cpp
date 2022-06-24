@@ -35,4 +35,33 @@ auto mode_kind_to_string(ModeKind kind) -> std::string
     }
 }
 
+auto mode_kind_from_string(const std::string& str) -> ModeKind
+{
+    if (str == "INIT") {
+        return ModeKind::INIT;
+    }
+
+    if (str == "DU") {
+        return ModeKind::DU;
+    }
+
+    if (str == "DU4") {
+        return ModeKind::DU4;
+    }
+
+    if (str == "A2") {
+        return ModeKind::A2;
+    }
+
+    if (str == "GC16") {
+        return ModeKind::GC16;
+    }
+
+    if (str == "GLR16") {
+        return ModeKind::GLR16;
+    }
+
+    return ModeKind::UNKNOWN;
 }
+
+} // namespace Waved

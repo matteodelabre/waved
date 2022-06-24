@@ -92,6 +92,9 @@ enum class ModeKind
 /** Get a human-readable name for a mode kind. */
 std::string mode_kind_to_string(ModeKind);
 
+/** Get a mode kind constant from its human-readable name. */
+ModeKind mode_kind_from_string(const std::string&);
+
 } // namespace Waved
 
 #endif // WAVED_DEFS_HPP
