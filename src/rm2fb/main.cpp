@@ -1,5 +1,5 @@
 #include "controller.hpp"
-#include "display.hpp"
+#include "generator.hpp"
 #include "ipc.cpp"
 #include <fstream>
 #include <semaphore.h> // sem_open

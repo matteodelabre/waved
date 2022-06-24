@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "display.hpp"
+#include "generator.hpp"
 #include <system_error>
 #include <chrono>
 #include <cstring>

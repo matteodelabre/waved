@@ -5,7 +5,7 @@
  */
 
 #include "controller.hpp"
-#include "display.hpp"
+#include "generator.hpp"
 #include "waveform_table.hpp"
 #include <iostream>
 #include <fstream>

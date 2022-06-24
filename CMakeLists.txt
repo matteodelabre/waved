@@ -13,14 +13,6 @@ if(ENABLE_PERF_REPORT)
     add_compile_definitions(ENABLE_PERF_REPORT)
 endif()
 
-# Option: Do not interact with the display, only generate frames
-# on the main thread
-option(DRY_RUN "Dry run: do not actually send updates" OFF)
-
-if(DRY_RUN)
-    add_compile_definitions(DRY_RUN)
-endif()
-
 # Enable C++17 support
 if(CMAKE_VERSION VERSION_LESS "3.8")
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -42,8 +34,8 @@ endif(CMAKE_COMPILER_IS_GNUCC)
 add_library(waved SHARED
     lib/controller.cpp
     lib/defs.cpp
-    lib/display.cpp
     lib/file_descriptor.cpp
+    lib/generator.cpp
     lib/update.cpp
     lib/waveform_table.cpp
 )
