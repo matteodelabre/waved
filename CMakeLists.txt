@@ -40,6 +40,7 @@ endif(CMAKE_COMPILER_IS_GNUCC)
 
 # Main library
 add_library(waved SHARED
+    lib/controller.cpp
     lib/defs.cpp
     lib/display.cpp
     lib/file_descriptor.cpp

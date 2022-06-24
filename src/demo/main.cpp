@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "controller.hpp"
 #include "display.hpp"
 #include "waveform_table.hpp"
 #include <iostream>
@@ -16,9 +17,9 @@
 #include <chrono>
 #include <random>
 
-void do_init(Waved::Display& display)
+void do_init(Waved::Generator& generator)
 {
-    auto update = display.push_update(
+    auto update = generator.push_update(
         Waved::ModeKind::INIT,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -27,10 +28,10 @@ void do_init(Waved::Display& display)
         },
         std::vector<Waved::Intensity>(1404 * 1872, 30)
     ).value();
-    display.wait_for(update);
+    generator.wait_for(update);
 }
 
-void do_gradients(Waved::Display& display)
+void do_gradients(Waved::Generator& generator)
 {
     constexpr std::size_t width = 50;
     constexpr std::size_t block_height = 100;
@@ -65,7 +66,7 @@ void do_gradients(Waved::Display& display)
     Waved::UpdateID last_update = 0;
 
     for (Waved::ModeID mode = 1; mode < 8; ++mode) {
-        display.push_update(
+        generator.push_update(
             mode,
             /* immediate = */ false,
             Waved::UpdateRegion{
@@ -76,7 +77,7 @@ void do_gradients(Waved::Display& display)
             },
             block_buffer
         );
-        last_update = display.push_update(
+        last_update = generator.push_update(
             mode,
             /* immediate = */ false,
             Waved::UpdateRegion{
@@ -89,10 +90,10 @@ void do_gradients(Waved::Display& display)
         ).value();
     }
 
-    display.wait_for(last_update);
+    generator.wait_for(last_update);
 }
 
-void do_all_diff(Waved::Display& display)
+void do_all_diff(Waved::Generator& generator)
 {
     std::vector<Waved::Intensity> buffer(1404 * 1872);
 
@@ -100,7 +101,7 @@ void do_all_diff(Waved::Display& display)
         buffer[i] = (i % 16) * 2;
     }
 
-    auto update = display.push_update(
+    auto update = generator.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -109,20 +110,20 @@ void do_all_diff(Waved::Display& display)
         },
         buffer
     ).value();
-    display.wait_for(update);
+    generator.wait_for(update);
 }
 
-void do_random(Waved::Display& display)
+void do_random(Waved::Generator& generator)
 {
     std::vector<Waved::Intensity> buffer(1404 * 1872);
-    std::mt19937 generator(424242);
+    std::mt19937 prng(424242);
     std::uniform_int_distribution<std::mt19937::result_type> distrib(0, 15);
 
     for (std::size_t i = 0; i < buffer.size(); ++i) {
-        buffer[i] = distrib(generator) * 2;
+        buffer[i] = distrib(prng) * 2;
     }
 
-    auto update = display.push_update(
+    auto update = generator.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -131,10 +132,10 @@ void do_random(Waved::Display& display)
         },
         buffer
     ).value();
-    display.wait_for(update);
+    generator.wait_for(update);
 }
 
-void do_spiral(Waved::Display& display)
+void do_spiral(Waved::Generator& generator)
 {
     using namespace std::literals::chrono_literals;
     int count = 700;
@@ -156,7 +157,7 @@ void do_spiral(Waved::Display& display)
         std::uint32_t x = width / 2 + std::round(std::cos(t) * ampl * scale);
         std::uint32_t y = height / 2 - std::round(std::sin(t) * ampl * scale);
 
-        last_update = display.push_update(
+        last_update = generator.push_update(
             Waved::ModeKind::A2,
             /* immediate = */ true,
             Waved::UpdateRegion{
@@ -168,10 +169,10 @@ void do_spiral(Waved::Display& display)
         std::this_thread::sleep_for(5ms);
     }
 
-    display.wait_for(last_update);
+    generator.wait_for(last_update);
 }
 
-void do_image(Waved::Display& display)
+void do_image(Waved::Generator& generator)
 {
     std::ifstream image{"./image.pgm"};
 
@@ -264,7 +265,7 @@ void do_image(Waved::Display& display)
         }
     }
 
-    auto update = display.push_update(
+    auto update = generator.push_update(
         Waved::ModeKind::GC16,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -273,7 +274,7 @@ void do_image(Waved::Display& display)
         },
         buffer
     ).value();
-    display.wait_for(update);
+    generator.wait_for(update);
 }
 
 void print_help(std::ostream& out, const char* name)
@@ -316,31 +317,8 @@ int main(int argc, const char** argv)
     }
 
     auto table = Waved::WaveformTable::from_wbf(wbf_path->data());
-    auto framebuffer_path = Waved::Display::discover_framebuffer();
-
-    if (!framebuffer_path) {
-        std::cerr << "[init] Cannot find framebuffer device\n";
-        return 2;
-    } else {
-        std::cerr << "[init] Using framebuffer device: "
-            << *framebuffer_path << '\n';
-    }
-
-    auto sensor_path = Waved::Display::discover_temperature_sensor();
-
-    if (!sensor_path) {
-        std::cerr << "[init] Cannot find temperature sensor\n";
-        return 3;
-    } else {
-        std::cerr << "[init] Using temperature sensor: "
-            << *sensor_path << '\n';
-    }
-
-    Waved::Display display{
-        framebuffer_path->data(),
-        sensor_path->data(),
-        std::move(table),
-    };
+    auto controller = Waved::Controller::open_remarkable2();
+    Waved::Generator generator(controller, table);
 
 #ifdef ENABLE_PERF_REPORT
     std::ofstream perf_report_out;
@@ -348,32 +326,32 @@ int main(int argc, const char** argv)
     if (argc) {
         perf_report_out.open(argv[0]);
         next_arg(argc, argv);
-        display.enable_perf_report(perf_report_out);
+        generator.enable_perf_report(perf_report_out);
     }
 #endif
 
-    display.start();
+    generator.start();
 
     std::cerr << "[test] Gradients\n";
-    do_init(display);
-    do_gradients(display);
+    do_init(generator);
+    do_gradients(generator);
 
     std::cerr << "[test] Image\n";
-    do_init(display);
-    do_image(display);
+    do_init(generator);
+    do_image(generator);
 
     std::cerr << "[test] All different values\n";
-    do_init(display);
-    do_all_diff(display);
+    do_init(generator);
+    do_all_diff(generator);
 
     std::cerr << "[test] Random values\n";
-    do_init(display);
-    do_random(display);
+    do_init(generator);
+    do_random(generator);
 
     std::cerr << "[test] Spiral\n";
-    do_init(display);
-    do_spiral(display);
+    do_init(generator);
+    do_spiral(generator);
 
-    display.wait_for_all();
+    generator.wait_for_all();
     return 0;
 }

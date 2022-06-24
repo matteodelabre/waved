@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef WAVED_DISPLAY_HPP
-#define WAVED_DISPLAY_HPP
+#ifndef WAVED_GENERATOR_HPP
+#define WAVED_GENERATOR_HPP
 
+#include "controller.hpp"
 #include "defs.hpp"
-#include "file_descriptor.hpp"
 #include "update.hpp"
 #include "waveform_table.hpp"
 #include <atomic>
@@ -23,42 +23,38 @@
 #include <cstdint>
 #include <vector>
 #include <set>
-#include <linux/fb.h>
 
 namespace Waved
 {
 
 /**
- * Interface to the display controller.
+ * Generates frames from update requests and sends them to the controller.
  *
  * This class processes update regions and drives the display controller with
- * appropriate waveforms to display the wanted intensities. It assumes it has
- * exclusive access to the controller, concurrent access will lead to
- * unpredictable behavior.
+ * appropriate waveforms to display the wanted intensities.
  */
-class Display
+class Generator
 {
 public:
     /**
-     * Open a display with the given device information.
+     * Initialize a generator for a given controller.
      *
-     * @param framebuffer_path Path to the framebuffer device.
-     * @param temperature_sensor_path Path to the temperature sensor file.
-     * @param waveform_table Display-specific waveform data.
+     * @param controller The controller to drive.
+     * @param waveform_table Controller-specific waveform data.
      */
-    Display(
-        const char* framebuffer_path,
-        const char* temperature_sensor_path,
-        WaveformTable waveform_table
+    Generator(
+        Controller& controller,
+        WaveformTable& waveform_table
     );
 
-    /** Discover the path to the framebuffer device. */
-    static std::optional<std::string> discover_framebuffer();
+    // No copies, only allow moves
+    Generator(const Generator&) = delete;
+    Generator& operator=(const Generator&) = delete;
+    Generator(Generator&&) = default;
+    Generator& operator=(Generator&&) = default;
 
-    /** Discover the path to the temperature sensor file. */
-    static std::optional<std::string> discover_temperature_sensor();
-
-    ~Display();
+    /** Destroy the generator. */
+    ~Generator();
 
     /**
      * Start processing updates.
@@ -110,7 +106,7 @@ public:
      * This method is a no-op unless ENABLE_PERF_REPORT is set at compile time.
      * When enabled, a CSV document is written to the given stream with
      * information on when each update enters or leaves the queue and when
-     * frames are generated and sent to the display.
+     * frames are generated and sent to the controller.
      *
      * The CSV document will contain one row per processed update (or batch of
      * updates), with the following information:
@@ -136,8 +132,11 @@ public:
     void disable_perf_report();
 
 private:
-    // Display-specific waveform information
-    WaveformTable table;
+    // Driven controller
+    Controller* controller;
+
+    // Controller-specific waveform information
+    WaveformTable* table;
 
     // True if the processing threads have been started
     bool started = false;
@@ -146,113 +145,8 @@ private:
     std::atomic<bool> stopping_generator = false;
     std::atomic<bool> stopping_vsync = false;
 
-    // File descriptor for the framebuffer device
-    FileDescriptor framebuffer_fd;
-
-    // Pointer to the mmap’ed framebuffer
-    std::uint8_t* framebuffer = nullptr;
-
     // Time after which to switch the controller off if no updates are received
     static constexpr std::chrono::milliseconds power_off_timeout{3000};
-
-    // True if the display controller is powered on
-    bool power_state = false;
-
-    /** Turn the display controller on or off. */
-    void set_power(bool power_state);
-
-    // Interval at which to take readings of the panel temperature
-    static constexpr std::chrono::seconds temperature_read_interval{30};
-
-    // File descriptor for reading the panel temperature
-    FileDescriptor temp_sensor_fd;
-
-    // Last panel temperature reading value and timestamp
-    int temperature = 0;
-    std::chrono::steady_clock::time_point temperature_last_read;
-
-    /** Update the panel temperature reading, if needed. */
-    void update_temperature();
-
-    // Structures used for communicating metadata with the display controller
-    fb_var_screeninfo var_info{};
-    fb_fix_screeninfo fix_info{};
-
-    // Fixed sizes for the framebuffer. Ideally, those sizes would be provided
-    // by var_info and fix_info above so we don’t have to hardcode them, but
-    // unfortunately they don’t match exactly
-
-    // Number of pixels in a row of the buffer
-    static constexpr std::uint32_t buf_width = 260;
-
-    // Number of bytes per pixel. The first two bytes of each pixel contain
-    // data for 8 actual display pixels (2 bits per pixel). The third byte
-    // contains a fixed value whose role is unclear (probably some sync
-    // markers). The fourth byte is null
-    static constexpr std::uint32_t buf_depth = 4;
-
-    // Number of bytes per row
-    static constexpr std::uint32_t buf_stride = buf_width * buf_depth;
-
-    // Number of actual display pixels in each buffer pixel (see above)
-    static constexpr std::uint32_t buf_actual_depth = 8;
-
-    // Number of rows in the screen
-    static constexpr std::uint32_t buf_height = 1408;
-
-    // Total size of a frame in bytes
-    static constexpr std::uint32_t buf_frame = buf_stride * buf_height;
-
-    // Buffer type for a single frame
-    using Frame = std::array<std::uint8_t, buf_frame>;
-
-    // Number of frames held in the buffer. The buffer contains more space
-    // than is needed for holding a single frame. This extra space is used to
-    // prepare the upcoming frames while the current frame is being sent to
-    // the display controller
-    static constexpr std::uint32_t buf_total_frames = 17;
-
-    // The MXSFB driver automatically flips to the last frame of the buffer
-    // after each vsync (unless we ask for another flip within the next
-    // vsync interval). By storing a null frame at this default location, we
-    // ensure that a charge is never applied for too long on the EPD, even
-    // if there is a bug in our program. This feature is called “prevent frying
-    // pan” mode in the MXSFB kernel driver
-    static constexpr std::uint32_t buf_default_frame = 16;
-
-    // Number of usable frames, excluding the default frame which
-    // we shouldn’t change for reasons stated above
-    static constexpr std::uint32_t buf_usable_frames = 16;
-
-    // Margins of unused pixels in each frame of the buffer
-    static constexpr std::uint32_t margin_top = 3;
-    static constexpr std::uint32_t margin_bottom = 1;
-    static constexpr std::uint32_t margin_left = 26;
-    static constexpr std::uint32_t margin_right = 0;
-
-    // Visible screen size. This is expressed in the EPD coordinate system,
-    // whose origin is at the bottom right corner of the usual reMarkable
-    // coordinate system, with the X and Y axes swapped and flipped
-    // (see the diagram below, representing a tablet in portrait orientation)
-    //
-    //       ^+--------------+
-    //       ||              | - X = epd_width
-    //       ||              |
-    //       ||              |
-    //       ||              |
-    //       ||  reMarkable  |
-    //       ||              |
-    //       ||              |
-    //       ||              | ^
-    //       ||              | | X = 0
-    //       ++--------------+ |
-    //         |         <-----+
-    //       Y = height . Y = 0
-    static constexpr std::uint32_t epd_width
-        = (buf_width - margin_left - margin_right) * buf_actual_depth;
-    static constexpr std::uint32_t epd_height
-        = buf_height - margin_top - margin_bottom;
-    static constexpr std::uint32_t epd_size = epd_width * epd_height;
 
     using IntensityArray = std::vector<Intensity>;
     using StepArray = std::vector<std::size_t>;
@@ -276,19 +170,16 @@ private:
     std::condition_variable processed_cv;
     std::mutex processing_lock;
 
-    // Frame that leaves cell intensities unchanged
-    Frame null_frame{};
-
     // Buffer to which to generator thread will write to generate frames
     // for each update
-    std::vector<Frame> generate_buffer{};
+    std::vector<std::vector<std::uint8_t>> generate_buffer{};
 
     // Update currently being processed by the generator thread
     Update generator_update;
 
     // Buffer from which the vsync thread will read frames to send
-    // to the display
-    std::vector<Frame> vsync_buffer{};
+    // to the controller
+    std::vector<std::vector<std::uint8_t>> vsync_buffer{};
 
     // Update currently being processed by the vsync thread
     Update vsync_update;
@@ -347,8 +238,8 @@ private:
     /** Thread that sends ready frames to the display controller via vsync. */
     std::thread vsync_thread;
     void run_vsync_thread();
-}; // class Display
+}; // class Generator
 
 } // namespace Waved
 
-#endif // WAVED_DISPLAY_HPP
+#endif // WAVED_GENERATOR_HPP

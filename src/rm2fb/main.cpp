@@ -1,3 +1,4 @@
+#include "controller.hpp"
 #include "display.hpp"
 #include "ipc.cpp"
 #include <fstream>
@@ -23,7 +24,7 @@ constexpr float to_float(uint16_t c)
          + (c         & 31) * (0.07 / 31); // blue
 }
 
-void do_update(Waved::Display &display, const swtfb::swtfb_update &s)
+void do_update(Waved::Generator& generator, const swtfb::swtfb_update& s)
 {
     auto mxcfb_update = s.mdata.update;
     auto rect = mxcfb_update.update_region;
@@ -57,7 +58,7 @@ void do_update(Waved::Display &display, const swtfb::swtfb_update &s)
     region.width = rect.width;
     region.height = rect.height;
 
-    display.push_update(mode, immediate, region, buffer);
+    generator.push_update(mode, immediate, region, buffer);
 }
 
 void print_help(std::ostream& out, const char* name)
@@ -99,31 +100,8 @@ int main(int argc, const char** argv)
     }
 
     auto table = Waved::WaveformTable::from_wbf(wbf_path->data());
-    auto framebuffer_path = Waved::Display::discover_framebuffer();
-
-    if (!framebuffer_path) {
-        std::cerr << "[init] Cannot find framebuffer device\n";
-        return 2;
-    } else {
-        std::cerr << "[init] Using framebuffer device: "
-            << *framebuffer_path << '\n';
-    }
-
-    auto sensor_path = Waved::Display::discover_temperature_sensor();
-
-    if (!sensor_path) {
-        std::cerr << "[init] Cannot find temperature sensor\n";
-        return 3;
-    } else {
-        std::cerr << "[init] Using temperature sensor: "
-            << *sensor_path << '\n';
-    }
-
-    Waved::Display display{
-        framebuffer_path->data(),
-        sensor_path->data(),
-        std::move(table),
-    };
+    auto controller = Waved::Controller::open_remarkable2();
+    Waved::Generator generator(controller, table);
 
 #ifdef ENABLE_PERF_REPORT
     std::ofstream perf_report_out;
@@ -131,13 +109,13 @@ int main(int argc, const char** argv)
     if (argc) {
         perf_report_out.open(argv[0]);
         next_arg(argc, argv);
-        display.enable_perf_report(perf_report_out);
+        generator.enable_perf_report(perf_report_out);
     }
 #endif
 
-    display.start();
+    generator.start();
 
-    auto init_update = display.push_update(
+    auto init_update = generator.push_update(
         Waved::ModeKind::INIT,
         /* immediate = */ false,
         Waved::UpdateRegion{
@@ -146,7 +124,7 @@ int main(int argc, const char** argv)
         },
         std::vector<Waved::Intensity>(1404 * 1872, 30)
     ).value();
-    display.wait_for(init_update);
+    generator.wait_for(init_update);
 
     SHARED_MEM = swtfb::ipc::get_shared_buffer();
 
@@ -154,7 +132,7 @@ int main(int argc, const char** argv)
         auto buf = MSGQ.recv();
         switch (buf.mtype) {
         case swtfb::ipc::UPDATE_t:
-            do_update(display, buf);
+            do_update(generator, buf);
             break;
 
         case swtfb::ipc::XO_t:
