@@ -47,32 +47,110 @@ int print_summary(const char* name, const Waved::WaveformTable& table)
     return EXIT_SUCCESS;
 }
 
-int print_details(const Waved::WaveformTable& table, int mode, int temp)
+int print_mode(
+    const char* name,
+    const Waved::WaveformTable& table,
+    int mode,
+    int temp,
+    bool by_frame
+)
 {
     try {
         const auto& waveform = table.lookup(mode, temp);
-        std::cerr << "Listing waveforms for mode " << mode << " and "
-            "temperature " << temp << " °C\n"
-            "(No-op waveforms are not shown)\n\n";
+        std::cerr << "Listing waveforms for mode " << mode << " ("
+            << Waved::mode_kind_to_string(table.get_mode_kind(mode))
+            << ") and temperature " << temp << " °C\n";
 
-        for (Waved::Intensity from = 0; from < Waved::intensity_values; ++from) {
-            for (Waved::Intensity to = 0; to < Waved::intensity_values; ++to) {
-                if (std::all_of(
-                    std::cbegin(waveform),
-                    std::cend(waveform),
-                    [from, to](const auto& matrix) {
-                        return matrix[from][to] == Waved::Phase::Noop;
+        if (!by_frame) {
+            std::cerr << "Waveforms are listed by transition (no-op "
+                "transitions are omitted)\n";
+            std::cerr << "Call '" << name << " FILE MODE TEMP --frames' to "
+                "list by frame instead\n\n";
+
+            for (
+                Waved::Intensity from = 0;
+                from < Waved::intensity_values;
+                ++from
+            ) {
+                for (
+                    Waved::Intensity to = 0;
+                    to < Waved::intensity_values;
+                    ++to
+                ) {
+                    if (std::all_of(
+                        std::cbegin(waveform),
+                        std::cend(waveform),
+                        [from, to](const auto& matrix) {
+                            return matrix[from][to] == Waved::Phase::Noop;
+                        }
+                    )) {
+                        // Skip no-op waveforms
+                        continue;
                     }
-                )) {
-                    // Skip no-op waveforms
-                    continue;
+
+                    std::cerr << "(" << std::setw(2) << static_cast<int>(from)
+                        << " -> " << std::setw(2) << static_cast<int>(to)
+                        << "): ";
+
+                    for (const auto& matrix : waveform) {
+                        std::cout << static_cast<int>(matrix[from][to]);
+                    }
+
+                    std::cerr << '\n';
+                }
+            }
+        } else {
+            std::cerr << "Waveforms are listed frame by frame (with repeated "
+                "frames indicated as such)\n";
+            std::cerr << "Call '" << name << " FILE MODE TEMP' to "
+                "list by transition instead\n\n";
+
+            for (std::size_t i = 0; i < waveform.size(); ++i) {
+                std::cerr << "Frame #" << i << ":";
+
+                const auto& prev = i > 0 ? waveform[i - 1] : waveform[i];
+                const auto& matrix = waveform[i];
+                bool repeat = false;
+
+                for (std::size_t j = 0; j < i; ++j) {
+                    if (waveform[i] == waveform[j]) {
+                        std::cerr << " (repeat frame #" << j << ")";
+                        repeat = true;
+                        break;
+                    }
                 }
 
-                std::cerr << "(" << std::setw(2) << static_cast<int>(from)
-                    << " -> " << std::setw(2) << static_cast<int>(to) << "): ";
+                if (!repeat) {
+                    std::cerr << '\n';
+                    std::cerr << "             1111111111222222222233\n";
+                    std::cerr << "   01234567890123456789012345678901\n\n";
 
-                for (const auto& matrix : waveform) {
-                    std::cout << static_cast<int>(matrix[from][to]);
+                    for (
+                        Waved::Intensity from = 0;
+                        from < Waved::intensity_values;
+                        ++from
+                    ) {
+                        std::cerr << std::setw(2) << static_cast<int>(from)
+                            << ' ';
+
+                        for (
+                            Waved::Intensity to = 0;
+                            to < Waved::intensity_values;
+                            ++to
+                        ) {
+                            if (matrix[from][to] != prev[from][to]) {
+                                std::cerr << "\033[31m";
+                            }
+
+                            std::cerr << static_cast<int>(matrix[from][to]);
+
+                            if (matrix[from][to] != prev[from][to]) {
+                                std::cerr << "\033[0m";
+                            }
+                        }
+
+                        std::cerr << '\n';
+                    }
                 }
 
                 std::cerr << '\n';
@@ -172,5 +250,8 @@ int main(int argc, const char** argv)
         return EXIT_FAILURE;
     }
 
-    return print_details(table, mode, temp);
+    next_arg(argc, argv);
+    bool by_frame = argc && argv[0] == std::string("--frames");
+
+    return print_mode(name, table, mode, temp, by_frame);
 }
